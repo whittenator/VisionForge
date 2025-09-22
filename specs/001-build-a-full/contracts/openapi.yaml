@@ -1,0 +1,142 @@
+openapi: 3.0.3
+info:
+  title: VisionForge API (MVP)
+  version: 0.1.0
+paths:
+  /api/projects:
+    post:
+      summary: Create project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+              required: [name]
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+  /api/datasets/{projectId}:
+    post:
+      summary: Create dataset
+      parameters:
+        - in: path
+          name: projectId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                media_type: { type: string, enum: [image, video] }
+              required: [name, media_type]
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dataset'
+  /api/ingest/upload-url:
+    post:
+      summary: Get pre-signed upload URL for asset to MinIO
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                datasetVersionId: { type: string }
+                filename: { type: string }
+                contentType: { type: string }
+              required: [datasetVersionId, filename]
+      responses:
+        '200':
+          description: URL info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string }
+                  fields: { type: object }
+  /api/train:
+    post:
+      summary: Launch training job (detection or classification)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+  /api/export/onnx:
+    post:
+      summary: Export model to ONNX
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnnxExportRequest'
+      responses:
+        '202':
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+components:
+  schemas:
+    Project:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+    Dataset:
+      type: object
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        name: { type: string }
+        media_type: { type: string }
+    Job:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string }
+        status: { type: string }
+        progress: { type: number }
+    TrainRequest:
+      type: object
+      properties:
+        projectId: { type: string }
+        datasetVersionId: { type: string }
+        task: { type: string, enum: [detection, classification] }
+        params: { type: object }
+      required: [projectId, datasetVersionId, task]
+    OnnxExportRequest:
+      type: object
+      properties:
+        experimentId: { type: string }
+        dynamicAxes: { type: boolean }
+      required: [experimentId]
