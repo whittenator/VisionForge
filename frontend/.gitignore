@@ -1,0 +1,8 @@
+# Frontend-specific ignores (in addition to root)
+/node_modules/
+/.vite/
+/.cache/
+/dist/
+/playwright-report/
+/test-results/
+*.tsbuildinfo

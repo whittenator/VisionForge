@@ -1,0 +1,12 @@
+# Backend-specific ignores (in addition to root)
+/venv/
+/.venv/
+/__pycache__/
+/.pytest_cache/
+/.mypy_cache/
+/dist/
+/build/
+/*.sqlite*
+/*.db
+/htmlcov/
+/.coverage*
