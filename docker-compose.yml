@@ -33,6 +33,9 @@ services:
   backend:
     build: ./backend
     env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
     depends_on:
       - postgres
       - minio
@@ -44,6 +47,9 @@ services:
   worker:
     build: ./backend
     env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
     depends_on:
       - backend
       - redis

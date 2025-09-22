@@ -1,5 +1,8 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
+import { AuthProvider } from "@/services/auth-store";
+import ProtectedRoute from "@/components/layout/ProtectedRoute";
+import LoginPage from "@/pages/auth/Login";
 import AppShell from "@/components/layout/AppShell";
 import AnnotatorPage from "./pages/annotate/Annotator";
 import AdminUsersPage from "./pages/admin/Users";
@@ -16,12 +19,15 @@ import ArtifactsExport from "./pages/artifacts/export";
 export default function App() {
   return (
     <BrowserRouter>
-      <AppShell>
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <div className="grid gap-6 md:grid-cols-[1.2fr_0.8fr] items-start">
+      <AuthProvider>
+        <AppShell>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <div className="grid gap-6 md:grid-cols-[1.2fr_0.8fr] items-start">
                 <div className="space-y-4">
                   <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">Build vision products faster</h1>
                   <p className="text-muted-foreground">Manage datasets, annotate frames, and iterate on models with an integrated workflow.</p>
@@ -44,23 +50,25 @@ export default function App() {
                     <div><div className="text-xl font-semibold">5</div><div className="text-xs text-muted-foreground">Models</div></div>
                   </div>
                 </div>
-              </div>
-            }
-          />
+                  </div>
+                </ProtectedRoute>
+              }
+            />
           {/* Frontend MVP routes (T051–T058) */}
-          <Route path="/projects" element={<ProjectsIndex />} />
-          <Route path="/projects/create" element={<ProjectsCreate />} />
-          <Route path="/projects/:projectId" element={<ProjectDashboard />} />
-          <Route path="/datasets/upload" element={<DatasetUpload />} />
-          <Route path="/datasets/version" element={<DatasetVersion />} />
-          <Route path="/experiments" element={<ExperimentsIndex />} />
-          <Route path="/experiments/new" element={<ExperimentsNew />} />
-          <Route path="/artifacts" element={<ArtifactsIndex />} />
-          <Route path="/artifacts/export" element={<ArtifactsExport />} />
-          <Route path="/annotate/:assetId" element={<AnnotatorPage />} />
-          <Route path="/admin/users" element={<AdminUsersPage />} />
-        </Routes>
-      </AppShell>
+            <Route path="/projects" element={<ProtectedRoute><ProjectsIndex /></ProtectedRoute>} />
+            <Route path="/projects/create" element={<ProtectedRoute><ProjectsCreate /></ProtectedRoute>} />
+            <Route path="/projects/:projectId" element={<ProtectedRoute><ProjectDashboard /></ProtectedRoute>} />
+            <Route path="/datasets/upload" element={<ProtectedRoute><DatasetUpload /></ProtectedRoute>} />
+            <Route path="/datasets/version" element={<ProtectedRoute><DatasetVersion /></ProtectedRoute>} />
+            <Route path="/experiments" element={<ProtectedRoute><ExperimentsIndex /></ProtectedRoute>} />
+            <Route path="/experiments/new" element={<ProtectedRoute><ExperimentsNew /></ProtectedRoute>} />
+            <Route path="/artifacts" element={<ProtectedRoute><ArtifactsIndex /></ProtectedRoute>} />
+            <Route path="/artifacts/export" element={<ProtectedRoute><ArtifactsExport /></ProtectedRoute>} />
+            <Route path="/annotate/:assetId" element={<ProtectedRoute><AnnotatorPage /></ProtectedRoute>} />
+            <Route path="/admin/users" element={<ProtectedRoute><AdminUsersPage /></ProtectedRoute>} />
+          </Routes>
+        </AppShell>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

@@ -3,14 +3,18 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Ensure Python can import modules from /app/src
+ENV PYTHONPATH=/app/src
+
 WORKDIR /app
 
-COPY pyproject.toml /app/pyproject.toml
-RUN pip install --upgrade pip && \
-    pip install -U wheel setuptools && \
-    pip install . || true
+# Install runtime dependencies explicitly to avoid relying on packaging metadata
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r /app/requirements.txt
 
-COPY src /app/src
+# Copy backend source (including alembic.ini and migrations)
+COPY . /app
 
 EXPOSE 8000
 

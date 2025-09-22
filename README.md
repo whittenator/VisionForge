@@ -37,11 +37,18 @@ See `specs/001-build-a-full/quickstart.md` for detailed steps; below is a short 
 - Backend (hot reload):
   - cd backend
   - source ../.venv/bin/activate
-  - uvicorn app.main:app --reload --port 8000
+  - uvicorn --app-dir src app.main:app --reload --port 8000
 - Frontend (Vite):
   - cd frontend
   - npm install
   - npm run dev
+
+Tip: If port 8000 is busy (e.g., WSL2 wslrelay.exe), run the backend on 8001 and point the frontend at it:
+- Backend:
+  - cd backend && uvicorn --app-dir src app.main:app --reload --port 8001
+- Frontend (set API URL for dev):
+  - cd frontend
+  - VITE_API_URL=http://localhost:8001 npm run dev
 
 ## Testing & Quality Gates
 - Backend unit subset:
