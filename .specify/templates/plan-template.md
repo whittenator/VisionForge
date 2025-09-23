@@ -47,12 +47,7 @@
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-The design MUST satisfy these gates derived from the project Constitution:
-
-- Code Quality: Linting/formatting configured; static typing enabled; no dead code; small, cohesive changes.
-- Testing: Tests-first for new work; unit + contract + integration tests planned; coverage goals defined.
-- UX Consistency: Uses shared design system/components; WCAG 2.1 AA acceptance; consistent empty/loading/error states.
-- Performance: Explicit budgets per feature; plan includes perf tests and monitoring; no known regressions vs. baseline.
+[Gates determined based on constitution file]
 
 ## Project Structure
 
@@ -214,4 +209,4 @@ ios/ or android/
 - [ ] Complexity deviations documented
 
 ---
-*Based on the project Constitution — see `.specify/memory/constitution.md`*
+*Based on Constitution v2.1.1 - See `/memory/constitution.md`*

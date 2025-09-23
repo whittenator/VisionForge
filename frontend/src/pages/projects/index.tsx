@@ -1,19 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import AppShell from '@/components/layout/AppShell';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Loading from '@/components/common/Loading';
 import EmptyState from '@/components/common/EmptyState';
+import { apiGet } from '@/services/api';
+
+interface Project {
+  id: string;
+  name: string;
+  description?: string;
+}
 
 export default function ProjectsIndex() {
-  const [loading] = useState(false);
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([
-    { id: 'p1', name: 'Sample Project' },
-  ]);
+  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>([]);
+
+  useEffect(() => {
+    apiGet<Project[]>('/api/projects')
+      .then(setProjects)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
 
   return (
-    <AppShell>
+    <>
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">Projects</h2>
         <Button as-child="true">
@@ -40,12 +51,13 @@ export default function ProjectsIndex() {
                 <CardTitle>{p.name}</CardTitle>
               </CardHeader>
               <CardContent>
+                <p>{p.description}</p>
                 <Link className="text-blue-700 underline" to={`/projects/${p.id}`}>Open dashboard</Link>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
-    </AppShell>
+    </>
   );
 }

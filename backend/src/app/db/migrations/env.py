@@ -19,9 +19,8 @@ if config.config_file_name is not None:
         pass
 
 # Add your model's MetaData object here for 'autogenerate' support
-# from app.db.base import Base
-# target_metadata = Base.metadata
-target_metadata = None
+from app.db.base import Base
+target_metadata = Base.metadata
 
 # Override URL from environment: prefer DATABASE_URL, else derive from POSTGRES_* vars
 database_url = os.getenv("DATABASE_URL")

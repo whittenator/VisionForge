@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.user import User
+from app.models.workspace import Workspace
 
 
 class AuthUser(TypedDict):
@@ -20,6 +21,21 @@ class AuthUser(TypedDict):
 def _hash_password(raw: str) -> str:
   # MVP insecure hash; replace with bcrypt/argon2 in production
   return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+class EmailAlreadyExistsError(Exception):
+  pass
+
+
+def register(db: Session, *, name: str, email: str, password: str) -> User:
+  existing = db.scalar(select(User).where(User.email == email))
+  if existing:
+    raise EmailAlreadyExistsError()
+  u = User(email=email, name=name, password_hash=_hash_password(password))
+  db.add(u)
+  db.commit()
+  db.refresh(u)
+  return u
 
 
 def authenticate(email: str, password: str) -> Optional[tuple[str, AuthUser]]:
@@ -39,18 +55,34 @@ def ensure_superuser() -> None:
   password = os.getenv("SUPERUSER_PASSWORD")
   if not email or not password:
     return
+  
   with SessionLocal() as db:
     db = db  # type: Session
+    
+    # Create or update superuser
     existing = db.scalar(select(User).where(User.email == email))
     if existing:
       # Update password if different
       hashed = _hash_password(password)
       if not existing.password_hash or existing.password_hash != hashed:
         existing.password_hash = hashed
-        existing.role = existing.role or "admin"
         db.add(existing)
         db.commit()
-      return
-    u = User(email=email, name="Administrator", role="admin", password_hash=_hash_password(password))
-    db.add(u)
-    db.commit()
+      user = existing
+    else:
+      user = User(email=email, name="Administrator", password_hash=_hash_password(password))
+      db.add(user)
+      db.commit()
+      db.refresh(user)
+    
+    # Ensure default workspace exists
+    default_workspace_id = "00000000-0000-0000-0000-000000000000"
+    existing_workspace = db.scalar(select(Workspace).where(Workspace.id == default_workspace_id))
+    if not existing_workspace:
+      workspace = Workspace(
+        id=default_workspace_id,
+        name="Default Workspace",
+        created_by=user.id
+      )
+      db.add(workspace)
+      db.commit()

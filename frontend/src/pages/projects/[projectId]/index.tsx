@@ -1,12 +1,11 @@
 import React from 'react';
 import { Link, useParams } from 'react-router-dom';
-import AppShell from '@/components/layout/AppShell';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 
 export default function ProjectDashboard() {
   const { projectId } = useParams();
   return (
-    <AppShell>
+    <div>
       <h2 className="text-xl font-semibold">Project {projectId}</h2>
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Card>
@@ -30,6 +29,6 @@ export default function ProjectDashboard() {
           </CardContent>
         </Card>
       </div>
-    </AppShell>
+    </div>
   );
 }

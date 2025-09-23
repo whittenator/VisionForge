@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -12,16 +12,16 @@ def _uuid() -> str:
     return str(uuid.uuid4())
 
 
-class Experiment(Base):
-    __tablename__ = "experiments"
+class ExperimentRun(Base):
+    __tablename__ = "experiment_runs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    params_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    dataset_version_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("dataset_versions.id"), nullable=True)
-    metrics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
-    started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dataset_version_id: Mapped[str] = mapped_column(String(36), ForeignKey("dataset_versions.id"), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")  # queued, running, succeeded, failed
+    params: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    metrics: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    artifacts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of artifact ids
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)

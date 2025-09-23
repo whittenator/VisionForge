@@ -1,6 +1,6 @@
 import time
 
-from backend.tests.conftest import client  # reuse TestClient
+from tests.conftest import client  # reuse TestClient
 
 ROUTES = [
     ("/api/projects", {"name": "Perf", "description": "test"}),

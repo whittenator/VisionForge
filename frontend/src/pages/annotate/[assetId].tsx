@@ -1,11 +1,10 @@
 import React from 'react';
-import AppShell from '@/components/layout/AppShell';
 import Annotator from '@/pages/annotate/Annotator';
 import Button from '@/components/ui/Button';
 
 export default function AnnotateAsset() {
   return (
-    <AppShell>
+    <div>
       <div className="mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold">Annotator</h2>
@@ -18,6 +17,6 @@ export default function AnnotateAsset() {
         </div>
       </div>
       <Annotator />
-    </AppShell>
+    </div>
   );
 }
