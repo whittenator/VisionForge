@@ -13,15 +13,15 @@
 ```
 
 ## Phase 3.1: Setup
-- [ ] T001 Confirm project structure per plan (web app with backend/ and frontend/) and ensure env files exist
-- [ ] T002 Backend deps check: FastAPI, SQLAlchemy, Alembic present in `backend/pyproject.toml` and requirements files
-- [ ] T003 Frontend deps check: React 19, Vite, Tailwind CSS 4 present in `frontend/package.json`
-- [ ] T004 [P] Configure/verify linters: `ruff` for backend, ESLint/Prettier for frontend; add CI notes
-- [ ] T005 [P] Add Playwright visual check note to PR process per Constitution (no code changes required)
+- [X] T001 Confirm project structure per plan (web app with backend/ and frontend/) and ensure env files exist
+- [X] T002 Backend deps check: FastAPI, SQLAlchemy, Alembic present in `backend/pyproject.toml` and requirements files
+- [X] T003 Frontend deps check: React 19, Vite, Tailwind CSS 4 present in `frontend/package.json`
+- [X] T004 [P] Configure/verify linters: `ruff` for backend, ESLint/Prettier for frontend; add CI notes
+- [X] T005 [P] Add Playwright visual check note to PR process per Constitution (no code changes required)
 
 ## Phase 3.2: Tests First (TDD) — Contracts & Flows
-- [ ] T006 [P] Contract test POST /auth/signup → `backend/tests/contract/test_auth_signup_post.py`
-- [ ] T007 [P] Contract test POST /auth/login → `backend/tests/contract/test_auth_login_post.py`
+- [X] T006 [P] Contract test POST /auth/signup → `backend/tests/contract/test_auth_signup_post.py`
+- [X] T007 [P] Contract test POST /auth/login → `backend/tests/contract/test_auth_login_post.py`
 - [ ] T008 [P] Contract test GET /projects → `backend/tests/contract/test_projects_get.py`
 - [ ] T009 [P] Contract test POST /datasets → `backend/tests/contract/test_datasets_post.py`
 - [ ] T010 [P] Contract test POST /datasets/{id}/uploads → `backend/tests/contract/test_dataset_uploads_post.py`

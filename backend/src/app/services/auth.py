@@ -22,6 +22,21 @@ def _hash_password(raw: str) -> str:
   return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+class EmailAlreadyExistsError(Exception):
+  pass
+
+
+def register(db: Session, *, name: str, email: str, password: str) -> User:
+  existing = db.scalar(select(User).where(User.email == email))
+  if existing:
+    raise EmailAlreadyExistsError()
+  u = User(email=email, name=name, role="viewer", password_hash=_hash_password(password))
+  db.add(u)
+  db.commit()
+  db.refresh(u)
+  return u
+
+
 def authenticate(email: str, password: str) -> Optional[tuple[str, AuthUser]]:
   with SessionLocal() as db:
     db = db  # type: Session

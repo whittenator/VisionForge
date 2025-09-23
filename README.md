@@ -71,15 +71,18 @@ Tip: If port 8000 is busy (e.g., WSL2 wslrelay.exe), run the backend on 8001 and
   - chmod +x scripts/lint_all.sh && ./scripts/lint_all.sh
 
 ## Governance
-- Constitution and tasking in `specs/001-build-a-full` (see `tasks.md`, `plan.md`)
-- Visual verification is required for any frontend change (see constitution v1.1.0)
-- Performance budgets enforced via tests (API p95 < 200ms on core endpoints)
+## PR Checklist (Frontend changes)
+
+For any frontend change (components, pages, styles, routing), include in your PR description:
+- Links to Playwright visual check evidence (screenshots at 1440px) for affected routes
+- Console logs captured during navigation
+- Notes on behavior validation vs. spec/acceptance criteria
+
+Run the existing Playwright scripts locally before pushing:
+- `npm run test:ui` (headless) or `npm run test:ui:headed` (headed)
 
 ## Troubleshooting
-- Vite may use the next available port if 5173 is busy; check the terminal output.
-- Ensure Playwright browsers are installed for visual checks:
   - cd frontend && npx playwright install --with-deps
-- If Celery tasks are not picked up, verify Redis and worker container are healthy.
 
 ## License
 Proprietary (adjust as needed).
