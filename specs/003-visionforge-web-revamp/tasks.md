@@ -1,6 +1,11 @@
 # Tasks: VisionForge Web Revamp
 
-**Input**: Design documents from `/specs/003-visionforge-web-revamp/`
+**Input**: Design documents from `/spec## Phase 3.5: UX, Performance, and Polish
+- [X] T046 [P] Playwright visual checks for key routes (header uniqueness, empty states) → `frontend/tests/visual/*`
+- [X] T047 [P] Accessibility sweep (focus rings, ARIA, skip-to-content) → `frontend/src/components/`
+- [X] T048 [P] Performance guards: uploads and annotation responsiveness; simple benchmarks or timing asserts → `backend/tests/perf/`
+- [X] T049 [P] Unit tests for validation and error handling → `backend/tests/unit/`
+- [X] T050 [P] Docs updates: api.md, manual-testing.md; update quickstart with any deltas → `specs/003-visionforge-web-revamp/`visionforge-web-revamp/`
 **Prerequisites**: plan.md (required), research.md, data-model.md, contracts/
 
 ## Execution Flow (main)
@@ -36,39 +41,39 @@
 
 ## Phase 3.3: Core Implementation
 ### Backend Models (from data-model.md)
-- [ ] T019 [P] Models: Workspace, Membership, Role enum → `backend/src/app/models/workspace.py`
-- [ ] T020 [P] Models: User → `backend/src/app/models/user.py`
-- [ ] T021 [P] Models: Project → `backend/src/app/models/project.py`
-- [ ] T022 [P] Models: Dataset, ClassMap → `backend/src/app/models/dataset.py`
-- [ ] T023 [P] Models: DatasetVersion, Asset, Annotation → `backend/src/app/models/dataset_version.py`
-- [ ] T024 [P] Models: ExperimentRun → `backend/src/app/models/experiment.py`
-- [ ] T025 [P] Models: ModelArtifact → `backend/src/app/models/artifact.py`
-- [ ] T026 [P] Models: Invitation, AuditEvent, Notification → `backend/src/app/models/admin.py`
+- [X] T019 [P] Models: Workspace, Membership, Role enum → `backend/src/app/models/workspace.py`
+- [X] T020 [P] Models: User → `backend/src/app/models/user.py`
+- [X] T021 [P] Models: Project → `backend/src/app/models/project.py`
+- [X] T022 [P] Models: Dataset, ClassMap → `backend/src/app/models/dataset.py`
+- [X] T023 [P] Models: DatasetVersion, Asset, Annotation → `backend/src/app/models/dataset_version.py`
+- [X] T024 [P] Models: ExperimentRun → `backend/src/app/models/experiment.py`
+- [X] T025 [P] Models: ModelArtifact → `backend/src/app/models/artifact.py`
+- [X] T026 [P] Models: Invitation, AuditEvent, Notification → `backend/src/app/models/admin.py`
 
 ### Backend Services & Endpoints (from contracts)
-- [ ] T027 Auth: POST /auth/signup → `backend/src/app/api/auth.py`
-- [ ] T028 Auth: POST /auth/login → `backend/src/app/api/auth.py`
-- [ ] T029 Projects: GET /projects → `backend/src/app/api/projects.py`
-- [ ] T030 Datasets: POST /datasets → `backend/src/app/api/datasets.py`
-- [ ] T031 Datasets: POST /datasets/{id}/uploads → `backend/src/app/api/datasets.py`
-- [ ] T032 Experiments: GET /experiments/runs → `backend/src/app/api/experiments.py`
-- [ ] T033 Experiments: GET /experiments/runs/{runId} → `backend/src/app/api/experiments.py`
-- [ ] T034 Artifacts: GET /artifacts/models → `backend/src/app/api/artifacts.py`
-- [ ] T035 Artifacts: POST /artifacts/models/{modelId}/export → `backend/src/app/api/artifacts.py`
+- [X] T027 Auth: POST /auth/signup → `backend/src/app/api/auth.py`
+- [X] T028 Auth: POST /auth/login → `backend/src/app/api/auth.py`
+- [X] T029 Projects: GET /projects → `backend/src/app/api/projects.py`
+- [X] T030 Datasets: POST /datasets → `backend/src/app/api/datasets.py`
+- [X] T031 Datasets: POST /datasets/{id}/uploads → `backend/src/app/api/datasets.py`
+- [X] T032 Experiments: GET /experiments/runs → `backend/src/app/api/experiments.py`
+- [X] T033 Experiments: GET /experiments/runs/{runId} → `backend/src/app/api/experiments.py`
+- [X] T034 Artifacts: GET /artifacts/models → `backend/src/app/api/artifacts.py`
+- [X] T035 Artifacts: POST /artifacts/models/{modelId}/export → `backend/src/app/api/artifacts.py`
 
 ### Frontend Shell & Critical Views
-- [ ] T036 App shell: ensure single global header via `frontend/src/components/layout/AppShell.tsx`; add test note
-- [ ] T037 Projects list page wired to GET /projects → `frontend/src/pages/projects/index.tsx`
-- [ ] T038 Datasets upload page wired to POST /datasets and uploads → `frontend/src/pages/datasets/upload.tsx`
-- [ ] T039 Experiments list/detail wired to runs endpoints → `frontend/src/pages/experiments/index.tsx`, `frontend/src/pages/experiments/new.tsx`
-- [ ] T040 Artifacts list/export wired to artifacts endpoints → `frontend/src/pages/artifacts/index.tsx`, `frontend/src/pages/artifacts/export.tsx`
+- [X] T036 App shell: ensure single global header via `frontend/src/components/layout/AppShell.tsx`; add test note
+- [X] T037 Projects list page wired to GET /projects → `frontend/src/pages/projects/index.tsx`
+- [X] T038 Datasets upload page wired to POST /datasets and uploads → `frontend/src/pages/datasets/upload.tsx`
+- [X] T039 Experiments list/detail wired to runs endpoints → `frontend/src/pages/experiments/index.tsx`, `frontend/src/pages/experiments/new.tsx`
+- [X] T040 Artifacts list/export wired to artifacts endpoints → `frontend/src/pages/artifacts/index.tsx`, `frontend/src/pages/artifacts/export.tsx`
 
 ## Phase 3.4: Integration
-- [ ] T041 DB session wiring and migrations for new models (Alembic) → `backend/`
-- [ ] T042 RBAC enforcement middleware and decorators → `backend/src/app/api/`
-- [ ] T043 Request/response logging, request IDs, and error handling filters → `backend/src/app/observability/`
-- [ ] T044 CORS and security headers config → `backend/src/app/main.py`
-- [ ] T045 Notifications: job completion events surfaced to UI (placeholder implementation) → `backend/src/app/services/`
+- [X] T041 DB session wiring and migrations for new models (Alembic) → `backend/`
+- [X] T042 RBAC enforcement middleware and decorators → `backend/src/app/api/`
+- [X] T043 Request/response logging, request IDs, and error handling filters → `backend/src/app/observability/`
+- [X] T044 CORS and security headers config → `backend/src/app/main.py`
+- [X] T045 Notifications: job completion events surfaced to UI (placeholder implementation) → `backend/src/app/services/`
 
 ## Phase 3.5: UX, Performance, and Polish
 - [ ] T046 [P] Playwright visual checks for key routes (header uniqueness, empty states) → `frontend/tests/visual/*`

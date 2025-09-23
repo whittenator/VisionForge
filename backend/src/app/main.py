@@ -9,6 +9,7 @@ from app.api.datasets import router as datasets_router
 from app.api.auth import router as auth_router
 from app.api.jobs import router as jobs_router
 from app.api.experiments import router as experiments_router
+from app.api.artifacts import router as artifacts_router
 from app.api.middleware import logging_middleware
 from app.api.ops import router as ops_router
 from app.api.projects import router as projects_router
@@ -39,9 +40,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _alembic_paths():
+    """Return absolute paths for alembic.ini and migration script_location.
+    Resolves correctly regardless of current working directory.
+    """
+    # This file lives at backend/src/app/main.py
+    app_dir = os.path.dirname(__file__)
+    backend_root = os.path.abspath(os.path.join(app_dir, "..", ".."))  # backend/
+    alembic_ini = os.path.join(backend_root, "alembic.ini")
+    migrations_dir = os.path.join(app_dir, "db", "migrations")
+    return alembic_ini, migrations_dir
+
+
+def _should_init_db() -> bool:
+    """Determine whether to run migrations and superuser setup.
+    Skips during test runs or when explicitly disabled via env.
+    """
+    if os.getenv("SKIP_DB_MIGRATIONS", "false").lower() == "true":
+        return False
+    # Pytest sets this env var for each test; treat as signal to skip heavy init
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return False
+    return True
+
+
 def _run_db_migrations():
-    cfg = AlembicConfig("alembic.ini")
-    cfg.set_main_option("script_location", "src/app/db/migrations")
+    alembic_ini, migrations_dir = _alembic_paths()
+    cfg = AlembicConfig(alembic_ini)
+    cfg.set_main_option("script_location", migrations_dir)
     # Small retry loop in case DB isn't ready yet
     attempts = 0
     while True:
@@ -54,9 +80,9 @@ def _run_db_migrations():
                 raise e
             time.sleep(2)
 
-
-_run_db_migrations()
-ensure_superuser()
+if _should_init_db():
+    _run_db_migrations()
+    ensure_superuser()
 
 app.include_router(projects_router)
 app.include_router(datasets_router)
@@ -65,6 +91,7 @@ app.include_router(al_router)
 app.include_router(jobs_router)
 app.include_router(auth_router)
 app.include_router(experiments_router)
+app.include_router(artifacts_router)
 
 @app.get("/health")
 def health():

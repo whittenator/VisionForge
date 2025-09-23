@@ -6,6 +6,15 @@ export function apiUrl(path: string) {
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+export async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(apiUrl(path));
+  if (!res.ok) {
+    const detail = await safeJson(res);
+    throw new Error(detail?.detail || `Request failed with ${res.status}`);
+  }
+  return (await res.json()) as T;
+}
+
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(apiUrl(path), {
     method: 'POST',

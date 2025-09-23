@@ -65,3 +65,4 @@ tmp/
 # 7) Misc
 .ipynb_checkpoints/
 .envrc
+.github

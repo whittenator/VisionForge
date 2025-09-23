@@ -1,6 +1,6 @@
 import time
 
-from backend.tests.conftest import client
+from tests.conftest import client
 
 
 def test_onnx_export_job_succeeds_quickly():

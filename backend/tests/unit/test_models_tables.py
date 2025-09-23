@@ -28,16 +28,23 @@ def test_tables_exist(tmp_path):
         "dataset_versions",
         "assets",
         "users",
+        "workspaces",
         "memberships",
+        "class_maps",
         "annotation_schemas",
         "annotations",
         "tracks",
-        "experiments",
-        "artifacts",
+        "experiment_runs",
+        "model_artifacts",
+        "invitations",
+        "notifications",
         "al_runs",
         "al_items",
         "jobs",
         "audits",
+        "audit_events",
     }
 
-    assert expected.issubset(set(insp.get_table_names()))
+    actual_tables = set(insp.get_table_names())
+    
+    assert expected.issubset(actual_tables)

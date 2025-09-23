@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_db
-from app.models.experiment import Experiment as ExperimentModel
+from app.models.experiment import ExperimentRun as ExperimentModel
 from app.schemas.experiment import Experiment as ExperimentSchema
 
 

@@ -16,8 +16,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    role: Mapped[str] = mapped_column(String(32), nullable=False, default="viewer")
+    last_login_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active_devices: Mapped[str | None] = mapped_column(String(1000), nullable=True)  # JSON string or similar
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())

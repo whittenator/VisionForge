@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from app.services import auth as auth_service
@@ -43,7 +44,12 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)):
     try:
         user = auth_service.register(db, name=req.name, email=str(req.email), password=req.password)
     except auth_service.EmailAlreadyExistsError:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        # Idempotent behavior: if the user already exists and the password matches, treat as login
+        auth = auth_service.authenticate(str(req.email), req.password)
+        if not auth:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        token, auth_user = auth
+        return JSONResponse(status_code=200, content={"token": token, "user": auth_user})
     # Optionally auto-login and return a token
     token, _ = auth_service.authenticate(user.email, req.password) or (None, None)
     body: dict[str, object] = {"user": {"id": user.id, "email": user.email, "name": user.name, "role": user.role}}
