@@ -8,6 +8,7 @@ from app.api.al import router as al_router
 from app.api.datasets import router as datasets_router
 from app.api.auth import router as auth_router
 from app.api.jobs import router as jobs_router
+from app.api.experiments import router as experiments_router
 from app.api.middleware import logging_middleware
 from app.api.ops import router as ops_router
 from app.api.projects import router as projects_router
@@ -63,6 +64,7 @@ app.include_router(ops_router)
 app.include_router(al_router)
 app.include_router(jobs_router)
 app.include_router(auth_router)
+app.include_router(experiments_router)
 
 @app.get("/health")
 def health():
