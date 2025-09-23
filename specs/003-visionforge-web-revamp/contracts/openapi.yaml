@@ -1,0 +1,135 @@
+openapi: 3.0.3
+info:
+  title: VisionForge API — Web Revamp (Contracts Skeleton)
+  version: 0.1.0
+servers:
+  - url: https://api.example.com
+paths:
+  /auth/signup:
+    post:
+      summary: Create account and initial workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, acceptTerms]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                acceptTerms: { type: boolean }
+      responses:
+        '201': { description: Account and workspace created }
+        '400': { description: Validation error }
+  /auth/login:
+    post:
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        '200': { description: Authenticated }
+        '401': { description: Invalid credentials or throttled }
+  /datasets:
+    post:
+      summary: Create dataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, name]
+              properties:
+                projectId: { type: string }
+                name: { type: string }
+                description: { type: string }
+      responses:
+        '201': { description: Dataset created }
+  /datasets/{datasetId}/uploads:
+    post:
+      summary: Initiate dataset upload session
+      parameters:
+        - in: path
+          name: datasetId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                createVersion: { type: boolean }
+                versionNotes: { type: string }
+      responses:
+        '202': { description: Upload session initiated }
+  /projects:
+    get:
+      summary: List projects
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: owner
+          schema: { type: string }
+        - in: query
+          name: tags
+          schema:
+            type: array
+            items: { type: string }
+      responses:
+        '200': { description: Projects list returned }
+  /experiments/runs:
+    get:
+      summary: List experiment runs
+      responses:
+        '200': { description: Runs list returned }
+  /experiments/runs/{runId}:
+    get:
+      summary: Get run detail
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Run detail returned }
+  /artifacts/models:
+    get:
+      summary: List model artifacts
+      responses:
+        '200': { description: Models list returned }
+  /artifacts/models/{modelId}/export:
+    post:
+      summary: Export model artifact (e.g., ONNX)
+      parameters:
+        - in: path
+          name: modelId
+          required: true
+          schema: { type: string }
+      responses:
+        '202': { description: Export initiated }
+components:
+  securitySchemes:
+    sessionAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
