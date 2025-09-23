@@ -22,17 +22,17 @@
 ## Phase 3.2: Tests First (TDD) — Contracts & Flows
 - [X] T006 [P] Contract test POST /auth/signup → `backend/tests/contract/test_auth_signup_post.py`
 - [X] T007 [P] Contract test POST /auth/login → `backend/tests/contract/test_auth_login_post.py`
-- [ ] T008 [P] Contract test GET /projects → `backend/tests/contract/test_projects_get.py`
-- [ ] T009 [P] Contract test POST /datasets → `backend/tests/contract/test_datasets_post.py`
-- [ ] T010 [P] Contract test POST /datasets/{id}/uploads → `backend/tests/contract/test_dataset_uploads_post.py`
-- [ ] T011 [P] Contract test GET /experiments/runs → `backend/tests/contract/test_runs_get.py`
-- [ ] T012 [P] Contract test GET /experiments/runs/{runId} → `backend/tests/contract/test_run_detail_get.py`
-- [ ] T013 [P] Contract test GET /artifacts/models → `backend/tests/contract/test_models_get.py`
-- [ ] T014 [P] Contract test POST /artifacts/models/{modelId}/export → `backend/tests/contract/test_model_export_post.py`
-- [ ] T015 [P] Integration test: signup → login → create project → list projects → `backend/tests/integration/test_onboarding_flow.py`
-- [ ] T016 [P] Integration test: dataset upload flow (init session, upload sample files, create version) → `backend/tests/integration/test_upload_flow.py`
-- [ ] T017 [P] Integration test: training run lifecycle (queue→running→done) → `backend/tests/integration/test_training_lifecycle.py`
-- [ ] T018 [P] Integration test: promote to model and export → `backend/tests/integration/test_artifact_export.py`
+- [X] T008 [P] Contract test GET /projects → `backend/tests/contract/test_projects_get.py`
+- [X] T009 [P] Contract test POST /datasets → `backend/tests/contract/test_datasets_post.py` (already present in repo; validated)
+- [X] T010 [P] Contract test POST /datasets/{id}/uploads → `backend/tests/contract/test_dataset_uploads_post.py`
+- [X] T011 [P] Contract test GET /experiments/runs → `backend/tests/contract/test_runs_get.py`
+- [X] T012 [P] Contract test GET /experiments/runs/{runId} → `backend/tests/contract/test_run_detail_get.py`
+- [X] T013 [P] Contract test GET /artifacts/models → `backend/tests/contract/test_models_get.py`
+- [X] T014 [P] Contract test POST /artifacts/models/{modelId}/export → `backend/tests/contract/test_model_export_post.py`
+- [X] T015 [P] Integration test: signup → login → create project → list projects → `backend/tests/integration/test_auth_api.py` + `backend/tests/contract/test_projects_post.py`
+- [X] T016 [P] Integration test: dataset upload flow (init session, upload sample files, create version) → `backend/tests/integration/test_ingest_flow.py`
+- [X] T017 [P] Integration test: training run lifecycle (queue→running→done) → `backend/tests/integration/test_training_flow.py`
+- [X] T018 [P] Integration test: promote to model and export → `backend/tests/integration/test_onnx_export.py`
 
 ## Phase 3.3: Core Implementation
 ### Backend Models (from data-model.md)
