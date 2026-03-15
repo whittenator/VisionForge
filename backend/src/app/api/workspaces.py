@@ -149,3 +149,50 @@ def invite_member(
     db.add(m)
     db.commit()
     return {"user_id": invited_user.id, "workspace_id": workspace_id, "role": role_value}
+
+
+@router.post("/{workspace_id}/invitations", status_code=201)
+def invite_member_v2(
+    workspace_id: str = Path(...),
+    body: InviteMember = ...,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    ws = db.get(Workspace, workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    email = body.email.strip().lower()
+    role = body.role
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+    invited_user = db.scalar(select(User).where(User.email == email))
+    if not invited_user:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No user with email {email!r}. They must sign up first.",
+        )
+    existing = db.scalar(
+        select(Membership).where(
+            Membership.workspace_id == workspace_id,
+            Membership.user_id == invited_user.id,
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="User is already a member of this workspace")
+    role_value = role if role in [r.value for r in Role] else Role.ANNOTATOR.value
+    m = Membership(
+        user_id=invited_user.id,
+        workspace_id=workspace_id,
+        role=role_value,
+        invited_by=current_user.id,
+    )
+    db.add(m)
+    db.commit()
+    db.refresh(m)
+    return {
+        "id": m.id,
+        "user_id": invited_user.id,
+        "email": invited_user.email,
+        "role": role_value,
+        "workspace_id": workspace_id,
+    }

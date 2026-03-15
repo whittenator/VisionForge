@@ -26,6 +26,7 @@ class ExperimentRun(Base):
     params_json: Mapped[str | None] = mapped_column("params", Text, nullable=True)  # DB column "params" mapped to params_json
     metrics_json: Mapped[str | None] = mapped_column("metrics", Text, nullable=True)  # DB column "metrics" mapped to metrics_json
     artifacts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evaluation_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)

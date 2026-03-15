@@ -78,6 +78,37 @@ def export_model(
     return Job(**job)
 
 
+@router.get("/artifacts/models/{model_id}/download")
+def download_model(
+    model_id: str,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    artifact = db.get(ModelArtifact, model_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if not artifact.storage_path:
+        raise HTTPException(status_code=404, detail="No file available for this artifact")
+    try:
+        import datetime
+        import os
+
+        from app.services.storage import get_minio_client
+
+        client = get_minio_client()
+        bucket = os.getenv("S3_BUCKET", os.getenv("MINIO_BUCKET", "visionforge"))
+        url = client.presigned_get_object(
+            bucket, artifact.storage_path, expires=datetime.timedelta(hours=1)
+        )
+        return {
+            "download_url": url,
+            "filename": artifact.storage_path.split("/")[-1],
+            "size_bytes": artifact.size_bytes,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {e}")
+
+
 @router.get("/artifacts/models/{model_id}/lineage")
 def get_lineage(
     model_id: str,

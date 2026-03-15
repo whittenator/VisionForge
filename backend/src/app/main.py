@@ -129,6 +129,12 @@ if _has_assets:
 if _has_workspaces:
     app.include_router(workspaces_router)
 
+try:
+    from app.api.evaluation import router as evaluation_router
+    app.include_router(evaluation_router)
+except ImportError:
+    pass
+
 
 @app.get("/health", tags=["ops"])
 def health():

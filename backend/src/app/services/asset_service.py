@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -45,6 +46,9 @@ def confirm_upload(
     height: int | None = None,
 ) -> Asset:
     """Register an asset after successful upload to MinIO."""
+    ver = db.get(DatasetVersion, version_id)
+    if ver and ver.locked:
+        raise HTTPException(status_code=400, detail="Cannot add assets to a locked dataset version")
     asset = Asset(
         dataset_id=dataset_id,
         version_id=version_id,
