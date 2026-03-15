@@ -18,11 +18,11 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-_bearer = HTTPBearer(auto_error=False)
+security = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
     if not credentials:
@@ -37,7 +37,7 @@ def get_current_user(
 
 
 def get_optional_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> User | None:
     if not credentials:

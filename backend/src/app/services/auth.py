@@ -4,7 +4,6 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional, TypedDict
 
-from fastapi import HTTPException, status
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -14,12 +13,12 @@ from app.db.session import SessionLocal
 from app.models.user import User
 from app.models.workspace import Workspace
 
-SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
+SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production-32-chars-min")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 
 
 class AuthUser(TypedDict):
@@ -45,38 +44,46 @@ def _is_bcrypt_hash(hashed: str) -> bool:
     return hashed.startswith(("$2b$", "$2a$", "$2y$"))
 
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(tz=timezone.utc) + (
-        expires_delta if expires_delta is not None else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    to_encode["exp"] = expire
-    to_encode["type"] = "access"
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+def create_access_token(user_id: str, email: str) -> str:
+    expire = datetime.now(tz=timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "exp": expire,
+        "type": "access",
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_refresh_token(data: dict) -> str:
-    to_encode = data.copy()
+def create_refresh_token(user_id: str) -> str:
     expire = datetime.now(tz=timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode["exp"] = expire
-    to_encode["type"] = "refresh"
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    payload = {
+        "sub": user_id,
+        "exp": expire,
+        "type": "refresh",
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def decode_token(token: str) -> dict:
+def decode_token(token: str) -> dict | None:
+    """Decode and validate a JWT token. Returns the payload dict or None if invalid."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except JWTError:
+        return None
+
+
+def get_current_user_from_token(token: str, db: Session) -> User:
+    from fastapi import HTTPException, status
+
+    payload = decode_token(token)
+    if payload is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-
-def get_current_user_from_token(token: str, db: Session) -> User:
-    payload = decode_token(token)
     user_id: str | None = payload.get("sub")
     if user_id is None:
         raise HTTPException(
@@ -133,8 +140,8 @@ def authenticate(email: str, password: str) -> Optional[tuple[str, str, AuthUser
             "email": user.email,
             "displayName": user.name or user.email,
         }
-        access_token = create_access_token({"sub": user.id})
-        refresh_token = create_refresh_token({"sub": user.id})
+        access_token = create_access_token(user.id, user.email)
+        refresh_token = create_refresh_token(user.id)
         return access_token, refresh_token, auth_user
 
 
