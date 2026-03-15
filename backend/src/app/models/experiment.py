@@ -17,11 +17,16 @@ class ExperimentRun(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False)
-    dataset_version_id: Mapped[str] = mapped_column(String(36), ForeignKey("dataset_versions.id"), nullable=False)
+    dataset_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("dataset_versions.id"), nullable=True
+    )
     owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")  # queued, running, succeeded, failed
-    params: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    metrics: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    artifacts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array of artifact ids
-    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="Unnamed Run")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    params_json: Mapped[str | None] = mapped_column("params", Text, nullable=True)  # DB column "params" mapped to params_json
+    metrics_json: Mapped[str | None] = mapped_column("metrics", Text, nullable=True)  # DB column "metrics" mapped to metrics_json
+    artifacts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
