@@ -1,0 +1,111 @@
+{
+  "id": null,
+  "uid": "vf-api-overview",
+  "title": "VisionForge — API Overview",
+  "tags": ["visionforge", "api"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(vf_http_requests_total[1m])",
+          "legendFormat": "{{method}} {{path}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "color": { "mode": "palette-classic" } }
+      }
+    },
+    {
+      "id": 2,
+      "title": "HTTP Error Rate (5xx)",
+      "type": "timeseries",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "rate(vf_http_requests_total{status=~\"5..\"}[1m])",
+          "legendFormat": "{{method}} {{path}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "red" } }
+      }
+    },
+    {
+      "id": 3,
+      "title": "P99 Request Latency (s)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, rate(vf_http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "P99",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, rate(vf_http_request_duration_seconds_bucket[5m]))",
+          "legendFormat": "P50",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s" }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Total Requests (last 1h)",
+      "type": "stat",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "increase(vf_http_requests_total[1h])",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "thresholds" } }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Error Rate %",
+      "type": "stat",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "100 * sum(rate(vf_http_requests_total{status=~\"5..\"}[5m])) / sum(rate(vf_http_requests_total[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

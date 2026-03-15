@@ -1,0 +1,131 @@
+{
+  "id": null,
+  "uid": "vf-dataset-health",
+  "title": "VisionForge — Dataset Health",
+  "tags": ["visionforge", "datasets"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-7d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Assets",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "PostgreSQL" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) as total FROM assets",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Label Coverage %",
+      "type": "gauge",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "PostgreSQL" },
+      "targets": [
+        {
+          "rawSql": "SELECT ROUND(100.0 * SUM(CASE WHEN label_status IN ('labeled', 'prelabeled') THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 1) as coverage FROM assets",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 80 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Assets by Label Status",
+      "type": "piechart",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PostgreSQL" },
+      "targets": [
+        {
+          "rawSql": "SELECT label_status, COUNT(*) as count FROM assets GROUP BY label_status",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Total Annotations",
+      "type": "stat",
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "PostgreSQL" },
+      "targets": [
+        {
+          "rawSql": "SELECT COUNT(*) as total FROM annotations",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Dataset Versions Created Over Time",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PostgreSQL" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', created_at) as time, COUNT(*) as versions FROM dataset_versions WHERE created_at > NOW() - INTERVAL '7 days' GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Annotations by Class",
+      "type": "bargauge",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PostgreSQL" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(class_name, 'unlabeled') as class, COUNT(*) as count FROM annotations GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "format": "table",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["last"] }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Assets Uploaded Per Day",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "PostgreSQL" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', created_at) as time, COUNT(*) as assets FROM assets WHERE created_at > NOW() - INTERVAL '30 days' GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    }
+  ]
+}
