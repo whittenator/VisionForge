@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
-import Button from '@/components/ui/Button';
 import Loading from '@/components/common/Loading';
 import EmptyState from '@/components/common/EmptyState';
 import ErrorState from '@/components/common/ErrorState';
@@ -29,17 +27,16 @@ function formatBytes(bytes: number): string {
 
 function typeVariant(type: string): 'default' | 'success' | 'warning' | 'danger' {
   switch (type?.toLowerCase()) {
-    case 'onnx': return 'success';
+    case 'onnx':    return 'success';
     case 'pytorch': return 'warning';
-    case 'weights': return 'default';
-    default: return 'default';
+    default:        return 'default';
   }
 }
 
 export default function ArtifactsIndex() {
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<Artifact[]>('/api/artifacts/models')
@@ -48,80 +45,95 @@ export default function ArtifactsIndex() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <Loading label="Loading artifacts…" />;
-  if (error) return <ErrorState title="Failed to load artifacts" description={error} />;
+  if (loading) return <div className="py-6"><Loading label="Loading artifacts…" /></div>;
+  if (error)   return <ErrorState title="Failed to load artifacts" description={error} />;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Artifacts</h1>
-        <Link to="/experiments" className="text-sm text-blue-600 hover:underline">
-          View Training Runs
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] pb-3">
+        <div>
+          <div className="label-overline mb-0.5">// Artifacts</div>
+          <h1>Model Artifacts</h1>
+        </div>
+        <Link to="/experiments" className="text-xs font-mono text-[var(--hud-accent)] hover:underline underline-offset-2">
+          VIEW RUNS →
         </Link>
       </div>
 
       {artifacts.length === 0 ? (
         <EmptyState
-          title="No model artifacts yet"
+          title="No model artifacts"
           description="Train a model to generate artifacts for export and deployment."
         >
           <Link
             to="/experiments/new"
-            className="inline-flex items-center rounded-md bg-blue-600 text-white px-4 h-9 text-sm hover:bg-blue-700"
+            className="inline-flex items-center h-7 px-3 text-xs font-mono border border-[var(--hud-accent)] text-[var(--hud-accent)] hover:bg-[var(--hud-accent-dim)] transition-colors"
           >
-            New Training Run
+            New Training Run →
           </Link>
         </EmptyState>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-px sm:grid-cols-2 lg:grid-cols-3 bg-[var(--hud-border-default)]">
           {artifacts.map((a) => (
-            <Card key={a.id} className="flex flex-col">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="text-base">
-                    {a.name || `Model v${a.version}`}
-                  </CardTitle>
-                  <Badge variant={typeVariant(a.type)}>{a.type}</Badge>
+            <div key={a.id} className="bg-[var(--hud-surface)] p-4 flex flex-col gap-2 hover:bg-[var(--hud-elevated)] transition-colors">
+              {/* Title + badge */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="font-semibold text-sm text-[var(--hud-text-primary)] leading-tight">
+                  {a.name || `Model v${a.version}`}
                 </div>
-              </CardHeader>
-              <CardContent className="flex-1 space-y-2 text-sm">
-                <div className="text-muted-foreground space-y-1">
-                  {a.project_name && (
-                    <div>Project: <span className="text-foreground">{a.project_name}</span></div>
-                  )}
-                  {a.run_id && (
-                    <div>
-                      Run:{' '}
-                      <Link
-                        to={`/experiments/runs/${a.run_id}`}
-                        className="text-blue-600 hover:underline font-mono"
-                      >
-                        {a.run_id.slice(0, 8)}…
-                      </Link>
-                    </div>
-                  )}
-                  {a.file_size_bytes != null && (
-                    <div>Size: <span className="text-foreground">{formatBytes(a.file_size_bytes)}</span></div>
-                  )}
-                  <div>Created: {new Date(a.created_at).toLocaleDateString()}</div>
-                </div>
+                <Badge variant={typeVariant(a.type)}>{a.type}</Badge>
+              </div>
 
-                <div className="flex gap-2 pt-2 border-t">
-                  <Link
-                    to={`/artifacts/export/${a.id}`}
-                    className="inline-flex items-center rounded-md bg-blue-600 text-white px-3 h-8 text-xs hover:bg-blue-700"
-                  >
-                    Export ONNX
-                  </Link>
-                  <Link
-                    to={`/artifacts/export/${a.id}`}
-                    className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 h-8 text-xs hover:bg-gray-50"
-                  >
-                    View Lineage
-                  </Link>
+              {/* Metadata */}
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs font-mono">
+                {a.project_name && (
+                  <div className="col-span-2 truncate">
+                    <span className="text-[var(--hud-text-muted)]">PROJ </span>
+                    <span className="text-[var(--hud-text-secondary)]">{a.project_name}</span>
+                  </div>
+                )}
+                {a.run_id && (
+                  <div>
+                    <span className="text-[var(--hud-text-muted)]">RUN </span>
+                    <Link
+                      to={`/experiments/runs/${a.run_id}`}
+                      className="text-[var(--hud-accent)] hover:underline underline-offset-1"
+                    >
+                      {a.run_id.slice(0, 8)}…
+                    </Link>
+                  </div>
+                )}
+                {a.file_size_bytes != null && (
+                  <div>
+                    <span className="text-[var(--hud-text-muted)]">SIZE </span>
+                    <span className="text-[var(--hud-text-data)]">{formatBytes(a.file_size_bytes)}</span>
+                  </div>
+                )}
+                <div>
+                  <span className="text-[var(--hud-text-muted)]">CREATED </span>
+                  <span className="text-[var(--hud-text-secondary)]">
+                    {new Date(a.created_at).toLocaleDateString()}
+                  </span>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+
+              {/* Actions */}
+              <div className="mt-auto pt-2 border-t border-[var(--hud-border-subtle)] flex gap-2">
+                <Link
+                  to={`/artifacts/export/${a.id}`}
+                  className="text-[0.6875rem] font-mono text-[oklch(0.10_0.008_240)] bg-[var(--hud-accent)] border border-[var(--hud-accent)] px-2 py-0.5 hover:bg-[var(--hud-accent-hover)] transition-colors"
+                >
+                  EXPORT ONNX
+                </Link>
+                <Link
+                  to={`/artifacts/export/${a.id}`}
+                  className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)] border border-[var(--hud-border-default)] px-2 py-0.5 hover:text-[var(--hud-accent)] hover:border-[var(--hud-accent)] transition-colors"
+                >
+                  LINEAGE
+                </Link>
+              </div>
+            </div>
           ))}
         </div>
       )}

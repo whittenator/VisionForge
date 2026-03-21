@@ -5,12 +5,15 @@ import Loading from '@/components/common/Loading';
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
-  if (isLoading)
+
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loading label="Loading..." />
+      <div className="flex items-center justify-center min-h-screen bg-[var(--hud-base)]">
+        <Loading label="Authenticating…" />
       </div>
     );
+  }
+
   if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }

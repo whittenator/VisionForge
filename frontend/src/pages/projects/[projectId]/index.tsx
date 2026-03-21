@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import Loading from '@/components/common/Loading';
@@ -36,15 +35,20 @@ interface Run {
 
 function statusBadgeVariant(status: string): 'default' | 'success' | 'warning' | 'danger' {
   switch (status) {
-    case 'succeeded':
-      return 'success';
-    case 'running':
-      return 'warning';
-    case 'failed':
-      return 'danger';
-    default:
-      return 'default';
+    case 'succeeded': return 'success';
+    case 'running':   return 'warning';
+    case 'failed':    return 'danger';
+    default:          return 'default';
   }
+}
+
+function StatCell({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3">
+      <div className="label-overline mb-1">{label}</div>
+      <div className="text-xl font-semibold font-mono text-[var(--hud-text-data)]">{value}</div>
+    </div>
+  );
 }
 
 export default function ProjectDashboard() {
@@ -73,126 +77,111 @@ export default function ProjectDashboard() {
       .finally(() => setLoading(false));
   }, [projectId]);
 
-  if (loading) return <Loading label="Loading project…" />;
+  if (loading) return <div className="py-6"><Loading label="Loading project…" /></div>;
   if (error) return <ErrorState title="Failed to load project" description={error} />;
   if (!project) return <ErrorState title="Project not found" />;
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <nav className="text-xs text-muted-foreground mb-1">
-            <Link to="/projects" className="hover:underline">Projects</Link>
-            {' / '}
-            <span>{project.name}</span>
-          </nav>
-          <h1 className="text-2xl font-semibold">{project.name}</h1>
-          {project.description && (
-            <p className="text-sm text-muted-foreground mt-1">{project.description}</p>
-          )}
-        </div>
-        <div className="flex gap-2 flex-shrink-0">
-          <Link
-            to={`/datasets/upload?projectId=${projectId}`}
-            className="inline-flex items-center rounded-md bg-blue-600 text-white px-4 h-9 text-sm hover:bg-blue-700"
-          >
-            Upload Assets
-          </Link>
-          <Link
-            to={`/experiments/new?projectId=${projectId}`}
-            className="inline-flex items-center rounded-md border border-gray-300 bg-white px-4 h-9 text-sm hover:bg-gray-50"
-          >
-            New Training Run
-          </Link>
+    <div className="space-y-5">
+      {/* Breadcrumb + header */}
+      <div className="border-b border-[var(--hud-border-subtle)] pb-3">
+        <nav className="label-overline mb-1">
+          <Link to="/projects" className="hover:text-[var(--hud-accent)] transition-colors">PROJECTS</Link>
+          <span className="mx-1.5 text-[var(--hud-border-strong)]">/</span>
+          <span className="text-[var(--hud-text-secondary)]">{project.name.toUpperCase()}</span>
+        </nav>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="flex items-center gap-2">
+              {project.name}
+              <Badge variant={project.status === 'active' ? 'success' : 'default'}>
+                {project.status || 'active'}
+              </Badge>
+            </h1>
+            {project.description && (
+              <p className="text-xs text-[var(--hud-text-muted)] mt-1 max-w-xl">{project.description}</p>
+            )}
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
+            <Button as="a" size="sm">
+              <Link to={`/datasets/upload?projectId=${projectId}`}>Upload Assets</Link>
+            </Button>
+            <Button variant="outline" size="sm" as="a">
+              <Link to={`/experiments/new?projectId=${projectId}`}>New Run</Link>
+            </Button>
+          </div>
         </div>
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">Datasets</div>
-          <div className="text-2xl font-semibold mt-1">{datasets.length}</div>
-        </div>
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">Total Assets</div>
-          <div className="text-2xl font-semibold mt-1">
-            {datasets.reduce((sum, d) => sum + (d.asset_count || 0), 0)}
-          </div>
-        </div>
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">Training Runs</div>
-          <div className="text-2xl font-semibold mt-1">{runs.length}</div>
-        </div>
-        <div className="rounded-lg border bg-card p-4">
-          <div className="text-sm text-muted-foreground">Status</div>
-          <div className="mt-1">
-            <Badge>{project.status || 'active'}</Badge>
-          </div>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[var(--hud-border-default)]">
+        <StatCell label="Datasets" value={datasets.length} />
+        <StatCell label="Total Assets" value={datasets.reduce((s, d) => s + (d.asset_count || 0), 0)} />
+        <StatCell label="Training Runs" value={runs.length} />
+        <StatCell
+          label="Created"
+          value={
+            <span className="text-sm font-normal text-[var(--hud-text-secondary)]">
+              {new Date(project.created_at).toLocaleDateString()}
+            </span>
+          }
+        />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        {/* Datasets section */}
+      {/* Two-column content */}
+      <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+        {/* Datasets */}
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-medium">Datasets</h2>
-            <Link
-              to={`/datasets?projectId=${projectId}`}
-              className="text-sm text-blue-600 hover:underline"
-            >
-              View all
+          <div className="flex items-center justify-between mb-2">
+            <span className="label-overline">Datasets</span>
+            <Link to={`/datasets?projectId=${projectId}`} className="text-xs font-mono text-[var(--hud-accent)] hover:underline underline-offset-2">
+              VIEW ALL →
             </Link>
           </div>
 
           {datasets.length === 0 ? (
             <EmptyState
-              title="No datasets yet"
+              title="No datasets"
               description="Upload images or annotations to get started."
             >
-              <Link
-                to={`/datasets/upload?projectId=${projectId}`}
-                className="inline-flex items-center rounded-md bg-blue-600 text-white px-4 h-9 text-sm hover:bg-blue-700"
-              >
-                Upload Dataset
-              </Link>
+              <Button size="sm" as="a">
+                <Link to={`/datasets/upload?projectId=${projectId}`}>Upload Dataset</Link>
+              </Button>
             </EmptyState>
           ) : (
-            <div className="space-y-3">
+            <div className="border border-[var(--hud-border-default)] divide-y divide-[var(--hud-border-subtle)]">
               {datasets.map((ds) => (
-                <Card key={ds.id}>
-                  <CardContent className="py-3 flex items-center justify-between">
-                    <div>
-                      <div className="font-medium text-sm">{ds.name}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {ds.asset_count} asset(s)
-                        {ds.latest_version != null && ` · v${ds.latest_version}`}
-                      </div>
+                <div key={ds.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-[var(--hud-elevated)] transition-colors">
+                  <div>
+                    <div className="text-sm font-medium text-[var(--hud-text-primary)]">{ds.name}</div>
+                    <div className="text-xs font-mono text-[var(--hud-text-muted)] mt-0.5">
+                      {ds.asset_count} assets
+                      {ds.latest_version != null && <span className="ml-2 text-[var(--hud-accent)]">v{ds.latest_version}</span>}
                     </div>
-                    <div className="flex gap-2 text-sm">
+                  </div>
+                  <div className="flex items-center gap-3 text-xs font-mono">
+                    <Link
+                      to={`/datasets/upload?projectId=${projectId}&datasetId=${ds.id}${ds.latest_version_id ? `&versionId=${ds.latest_version_id}` : ''}`}
+                      className="text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)] transition-colors"
+                    >
+                      UPLOAD
+                    </Link>
+                    <Link
+                      to={`/datasets/version?datasetId=${ds.id}`}
+                      className="text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)] transition-colors"
+                    >
+                      SNAPSHOT
+                    </Link>
+                    {ds.asset_count > 0 && (
                       <Link
-                        to={`/datasets/upload?projectId=${projectId}&datasetId=${ds.id}${ds.latest_version_id ? `&versionId=${ds.latest_version_id}` : ''}`}
-                        className="text-blue-600 hover:underline"
+                        to={`/annotate/${ds.id}`}
+                        className="text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)] transition-colors"
                       >
-                        Upload
+                        ANNOTATE
                       </Link>
-                      <Link
-                        to={`/datasets/version?datasetId=${ds.id}`}
-                        className="text-blue-600 hover:underline"
-                      >
-                        Snapshot
-                      </Link>
-                      {ds.asset_count > 0 && (
-                        <Link
-                          to={`/annotate/${ds.id}`}
-                          className="text-blue-600 hover:underline"
-                        >
-                          Annotate
-                        </Link>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           )}
@@ -200,35 +189,28 @@ export default function ProjectDashboard() {
 
         {/* Recent Runs */}
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-medium">Recent Training Runs</h2>
-            <Link to="/experiments" className="text-sm text-blue-600 hover:underline">
-              View all
+          <div className="flex items-center justify-between mb-2">
+            <span className="label-overline">Recent Runs</span>
+            <Link to="/experiments" className="text-xs font-mono text-[var(--hud-accent)] hover:underline underline-offset-2">
+              VIEW ALL →
             </Link>
           </div>
 
           {runs.length === 0 ? (
-            <EmptyState
-              title="No training runs yet"
-              description="Launch a new training run to train a model."
-            >
-              <Link
-                to={`/experiments/new?projectId=${projectId}`}
-                className="inline-flex items-center rounded-md bg-blue-600 text-white px-4 h-9 text-sm hover:bg-blue-700"
-              >
-                New Run
-              </Link>
+            <EmptyState title="No training runs" description="Launch a training run to train a model.">
+              <Button size="sm" as="a">
+                <Link to={`/experiments/new?projectId=${projectId}`}>New Run</Link>
+              </Button>
             </EmptyState>
           ) : (
-            <div className="space-y-2">
+            <div className="border border-[var(--hud-border-default)] divide-y divide-[var(--hud-border-subtle)]">
               {runs.map((r) => (
-                <div
-                  key={r.id}
-                  className="flex items-center justify-between rounded-lg border bg-card px-4 py-2.5"
-                >
+                <div key={r.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-[var(--hud-elevated)] transition-colors">
                   <div>
-                    <div className="text-sm font-medium">{r.name || `Run ${r.id.slice(0, 8)}`}</div>
-                    <div className="text-xs text-muted-foreground">
+                    <div className="text-sm font-medium text-[var(--hud-text-primary)]">
+                      {r.name || `Run ${r.id.slice(0, 8)}`}
+                    </div>
+                    <div className="text-xs font-mono text-[var(--hud-text-muted)] mt-0.5">
                       {new Date(r.created_at).toLocaleDateString()}
                     </div>
                   </div>
@@ -236,9 +218,9 @@ export default function ProjectDashboard() {
                     <Badge variant={statusBadgeVariant(r.status)}>{r.status}</Badge>
                     <Link
                       to={`/experiments/runs/${r.id}`}
-                      className="text-xs text-blue-600 hover:underline"
+                      className="text-xs font-mono text-[var(--hud-accent)] hover:underline underline-offset-2"
                     >
-                      Details
+                      →
                     </Link>
                   </div>
                 </div>
@@ -249,32 +231,19 @@ export default function ProjectDashboard() {
       </div>
 
       {/* Quick actions */}
-      <section className="rounded-lg border bg-card p-4">
-        <h2 className="text-sm font-medium text-muted-foreground mb-3">Quick Actions</h2>
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] px-4 py-3">
+        <div className="label-overline mb-2">Quick Actions</div>
         <div className="flex flex-wrap gap-2">
-          <Link
-            to={`/datasets/upload?projectId=${projectId}`}
-            className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 h-8 text-sm hover:bg-gray-50"
-          >
-            Upload Dataset
-          </Link>
-          <Link
-            to={`/experiments/new?projectId=${projectId}`}
-            className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 h-8 text-sm hover:bg-gray-50"
-          >
-            New Training Run
-          </Link>
-          <Link
-            to="/artifacts"
-            className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 h-8 text-sm hover:bg-gray-50"
-          >
-            View Artifacts
-          </Link>
+          <Button variant="outline" size="sm" as="a">
+            <Link to={`/datasets/upload?projectId=${projectId}`}>Upload Dataset</Link>
+          </Button>
+          <Button variant="outline" size="sm" as="a">
+            <Link to={`/experiments/new?projectId=${projectId}`}>New Training Run</Link>
+          </Button>
+          <Button variant="outline" size="sm" as="a">
+            <Link to="/artifacts">View Artifacts</Link>
+          </Button>
         </div>
-      </section>
-
-      <div className="text-xs text-muted-foreground">
-        Created {new Date(project.created_at).toLocaleDateString()}
       </div>
     </div>
   );

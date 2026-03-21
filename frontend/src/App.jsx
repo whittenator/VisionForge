@@ -20,6 +20,25 @@ import ArtifactsExport from "./pages/artifacts/export";
 import { apiGet } from "@/services/api";
 import Spinner from "@/components/ui/Spinner";
 
+function StatReadout({ label, value, loading, href }) {
+  return (
+    <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3 flex flex-col gap-1">
+      <div className="label-overline">{label}</div>
+      <div className="text-2xl font-semibold font-mono text-[var(--hud-text-data)]">
+        {loading ? <Spinner size={18} /> : value ?? 0}
+      </div>
+      {href && (
+        <Link
+          to={href}
+          className="text-[0.6875rem] font-mono text-[var(--hud-accent)] hover:underline underline-offset-2 mt-1"
+        >
+          VIEW →
+        </Link>
+      )}
+    </div>
+  );
+}
+
 function HomeDashboard() {
   const [stats, setStats] = useState({ projects: null, datasets: null, models: null });
   const [statsLoading, setStatsLoading] = useState(true);
@@ -42,56 +61,88 @@ function HomeDashboard() {
   }, []);
 
   return (
-    <div className="grid gap-6 md:grid-cols-[1.2fr_0.8fr] items-start">
-      <div className="space-y-4">
-        <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
-          Build vision products faster
-        </h1>
-        <p className="text-muted-foreground">
-          Manage datasets, annotate frames, and iterate on models with an integrated workflow.
-        </p>
-        <div className="flex gap-3">
-          <Link
-            className="inline-flex h-10 items-center rounded-md bg-primary px-4 text-primary-foreground hover:opacity-90"
-            to="/projects/create"
-          >
-            New Project
-          </Link>
-          <Link
-            className="inline-flex h-10 items-center rounded-md border px-4 hover:bg-muted"
-            to="/datasets/upload"
-          >
-            Upload Dataset
-          </Link>
+    <div className="space-y-6">
+      {/* Hero section */}
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-6">
+        {/* Top label */}
+        <div className="label-overline mb-3">// VisionForge · Computer Vision Platform</div>
+
+        <div className="grid gap-6 md:grid-cols-[1fr_auto] items-center">
+          <div className="space-y-3">
+            <h1 className="text-xl font-semibold tracking-tight text-[var(--hud-text-primary)]">
+              Manage datasets, annotate frames,<br />and iterate on models.
+            </h1>
+            <p className="text-xs text-[var(--hud-text-muted)] max-w-md">
+              End-to-end CV workflow: ingest → annotate → train → export → deploy.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <Link
+                to="/projects/create"
+                className="inline-flex items-center h-8 px-3 text-xs font-mono font-medium bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)] border border-[var(--hud-accent)] hover:bg-[var(--hud-accent-hover)] transition-colors tracking-wide"
+              >
+                + NEW PROJECT
+              </Link>
+              <Link
+                to="/datasets/upload"
+                className="inline-flex items-center h-8 px-3 text-xs font-mono text-[var(--hud-text-secondary)] border border-[var(--hud-border-strong)] hover:border-[var(--hud-border-accent)] hover:bg-[var(--hud-elevated)] transition-colors tracking-wide"
+              >
+                UPLOAD DATASET
+              </Link>
+            </div>
+          </div>
+
+          {/* System status panel */}
+          <div className="border border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-4 py-3 min-w-[160px]">
+            <div className="label-overline mb-2">System Status</div>
+            <div className="space-y-1.5 text-xs font-mono">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--hud-text-muted)]">API</span>
+                <span className="text-[var(--hud-success-text)]">● ONLINE</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--hud-text-muted)]">QUEUE</span>
+                <span className="text-[var(--hud-success-text)]">● ONLINE</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[var(--hud-text-muted)]">STORAGE</span>
+                <span className="text-[var(--hud-success-text)]">● ONLINE</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-      <div className="rounded-xl border bg-card p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm text-muted-foreground">Active Projects</div>
-            <div className="text-2xl font-semibold">
-              {statsLoading ? <Spinner /> : stats.projects ?? 0}
-            </div>
-          </div>
-          <div className="size-10 rounded-full bg-primary/10" />
+
+      {/* Stats row */}
+      <div>
+        <div className="label-overline mb-2">Platform Overview</div>
+        <div className="grid grid-cols-3 gap-px bg-[var(--hud-border-default)]">
+          <StatReadout label="Projects"  value={stats.projects} loading={statsLoading} href="/projects"    />
+          <StatReadout label="Datasets"  value={stats.datasets} loading={statsLoading} href="/datasets"    />
+          <StatReadout label="Models"    value={stats.models}   loading={statsLoading} href="/artifacts"   />
         </div>
-        <div className="mt-6 grid grid-cols-3 gap-4 text-center">
-          <div>
-            <div className="text-xl font-semibold">
-              {statsLoading ? <Spinner /> : stats.datasets ?? 0}
-            </div>
-            <div className="text-xs text-muted-foreground">Datasets</div>
-          </div>
-          <div>
-            <div className="text-xl font-semibold text-muted-foreground text-sm">—</div>
-            <div className="text-xs text-muted-foreground">Assets</div>
-          </div>
-          <div>
-            <div className="text-xl font-semibold">
-              {statsLoading ? <Spinner /> : stats.models ?? 0}
-            </div>
-            <div className="text-xs text-muted-foreground">Models</div>
-          </div>
+      </div>
+
+      {/* Quick nav grid */}
+      <div>
+        <div className="label-overline mb-2">Quick Access</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[var(--hud-border-default)]">
+          {[
+            { to: '/projects',    label: 'PROJECTS',    desc: 'Manage project workspaces'      },
+            { to: '/datasets',   label: 'DATASETS',    desc: 'Browse and upload datasets'     },
+            { to: '/experiments', label: 'EXPERIMENTS', desc: 'Training runs and metrics'      },
+            { to: '/artifacts',  label: 'ARTIFACTS',   desc: 'Model exports and lineage'      },
+          ].map(({ to, label, desc }) => (
+            <Link
+              key={to}
+              to={to}
+              className="bg-[var(--hud-surface)] px-4 py-3 hover:bg-[var(--hud-elevated)] transition-colors group"
+            >
+              <div className="text-xs font-mono font-semibold tracking-widest text-[var(--hud-text-secondary)] group-hover:text-[var(--hud-accent)] transition-colors">
+                {label}
+              </div>
+              <div className="text-[0.6875rem] text-[var(--hud-text-muted)] mt-0.5">{desc}</div>
+            </Link>
+          ))}
         </div>
       </div>
     </div>

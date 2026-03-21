@@ -4,7 +4,7 @@ import { useAuth } from '@/services/auth-store';
 
 export default function LoginPage() {
   const { login, signup } = useAuth();
-  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [mode, setMode] = useState('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -37,80 +37,121 @@ export default function LoginPage() {
     setError('');
   }
 
+  const inputClass =
+    'w-full h-8 border border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-3 text-sm text-[var(--hud-text-primary)] font-mono placeholder:text-[var(--hud-text-muted)] placeholder:font-sans focus:outline-none focus:ring-1 focus:ring-[var(--hud-accent)] focus:border-[var(--hud-border-accent)] transition-colors';
+
   return (
-    <div className="min-h-[calc(100vh-4rem)] grid place-items-center">
-      <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold mb-4">
-          {mode === 'login' ? 'Login' : 'Create account'}
-        </h1>
-        <form onSubmit={onSubmit} className="space-y-4">
-          {mode === 'signup' && (
-            <div className="space-y-2">
-              <label htmlFor="name" className="text-sm font-medium">
-                Name
+    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center px-4">
+      <div className="w-full max-w-sm">
+        {/* Header */}
+        <div className="mb-6">
+          <div className="text-[0.625rem] font-mono tracking-widest text-[var(--hud-text-muted)] uppercase mb-2">
+            {mode === 'login' ? '// AUTHENTICATION' : '// ACCOUNT CREATION'}
+          </div>
+          <h1 className="text-lg font-semibold tracking-wide text-[var(--hud-text-primary)]">
+            {mode === 'login' ? 'Sign in to VisionForge' : 'Create your account'}
+          </h1>
+        </div>
+
+        {/* Form panel */}
+        <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+          {/* Panel header rule */}
+          <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
+            <div className="h-1.5 w-1.5 bg-[var(--hud-accent)]" />
+            <span className="text-[0.6875rem] font-mono tracking-widest text-[var(--hud-text-muted)] uppercase">
+              {mode === 'login' ? 'Login' : 'Register'}
+            </span>
+          </div>
+
+          <form onSubmit={onSubmit} className="p-4 space-y-3">
+            {mode === 'signup' && (
+              <div className="space-y-1">
+                <label htmlFor="name" className="block text-[0.6875rem] font-mono tracking-widest text-[var(--hud-text-muted)] uppercase">
+                  Full Name
+                </label>
+                <input
+                  id="name"
+                  name="name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className={inputClass}
+                  placeholder="Jane Smith"
+                  required
+                />
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label htmlFor="email" className="block text-[0.6875rem] font-mono tracking-widest text-[var(--hud-text-muted)] uppercase">
+                Email
               </label>
               <input
-                id="name"
-                name="name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md border px-3 py-2"
+                id="email"
+                name="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className={inputClass}
+                placeholder="user@domain.com"
                 required
               />
             </div>
-          )}
-          <div className="space-y-2">
-            <label htmlFor="email" className="text-sm font-medium">
-              Email
-            </label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border px-3 py-2"
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <label htmlFor="password" className="text-sm font-medium">
-              Password
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border px-3 py-2"
-              required
-            />
-          </div>
-          {error && (
-            <div role="alert" className="text-sm text-red-600">
-              {error}
+
+            <div className="space-y-1">
+              <label htmlFor="password" className="block text-[0.6875rem] font-mono tracking-widest text-[var(--hud-text-muted)] uppercase">
+                Password
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={inputClass}
+                placeholder="••••••••"
+                required
+              />
             </div>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-primary-foreground hover:opacity-90 disabled:opacity-50"
-          >
-            {loading ? (mode === 'signup' ? 'Creating account…' : 'Signing in…') : mode === 'signup' ? 'Create account' : 'Sign in'}
-          </button>
-        </form>
-        <p className="mt-4 text-sm text-center text-muted-foreground">
-          {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}{' '}
-          <button
-            type="button"
-            onClick={toggleMode}
-            className="text-primary underline-offset-4 hover:underline"
-          >
-            {mode === 'login' ? 'Sign up' : 'Sign in'}
-          </button>
-        </p>
+
+            {error && (
+              <div
+                role="alert"
+                className="border border-[var(--hud-danger)] border-l-2 bg-[var(--hud-danger-dim)] px-3 py-2 text-xs font-mono text-[var(--hud-danger-text)]"
+              >
+                ERR: {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-1 w-full h-8 bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)] border border-[var(--hud-accent)] text-xs font-mono font-medium tracking-widest uppercase hover:bg-[var(--hud-accent-hover)] disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            >
+              {loading
+                ? mode === 'signup'
+                  ? 'CREATING…'
+                  : 'AUTHENTICATING…'
+                : mode === 'signup'
+                ? 'CREATE ACCOUNT'
+                : 'SIGN IN'}
+            </button>
+          </form>
+
+          {/* Mode toggle */}
+          <div className="border-t border-[var(--hud-border-subtle)] px-4 py-3 text-center">
+            <span className="text-xs text-[var(--hud-text-muted)]">
+              {mode === 'login' ? 'No account?' : 'Already registered?'}{' '}
+            </span>
+            <button
+              type="button"
+              onClick={toggleMode}
+              className="text-xs text-[var(--hud-accent)] hover:underline underline-offset-2 font-mono"
+            >
+              {mode === 'login' ? 'Sign up →' : '← Sign in'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

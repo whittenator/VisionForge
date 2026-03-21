@@ -8,9 +8,15 @@ export default function SuccessState({
   description?: string;
 }) {
   return (
-    <div role="status" aria-live="polite" className="rounded-lg border border-border bg-green-50 p-4 text-green-800">
-      <h3 className="text-base font-semibold">{title}</h3>
-      <p className="mt-1 text-sm">{description}</p>
+    <div
+      role="status"
+      aria-live="polite"
+      className="border border-[var(--hud-success)] border-l-2 bg-[var(--hud-success-dim)] px-4 py-3"
+    >
+      <h3 className="text-sm font-semibold text-[var(--hud-success-text)] uppercase tracking-wide">
+        {title}
+      </h3>
+      <p className="mt-1 text-xs text-[var(--hud-success-text)] opacity-80">{description}</p>
     </div>
   );
 }

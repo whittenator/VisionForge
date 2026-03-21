@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
 import Alert from '@/components/ui/Alert';
@@ -27,14 +26,12 @@ export default function ProjectsCreate() {
       setError('Project name is required');
       return;
     }
-    
     setError(null);
     setLoading(true);
-    
     try {
-      const project = await apiPost<Project>('/api/projects', { 
-        name, 
-        description: description || undefined 
+      const project = await apiPost<Project>('/api/projects', {
+        name,
+        description: description || undefined,
       });
       setCreated(`Created project ${name}`);
       setTimeout(() => navigate(`/projects/${project.id}`), 400);
@@ -46,37 +43,63 @@ export default function ProjectsCreate() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>New Project</CardTitle>
-      </CardHeader>
-      <CardContent>
-      <form onSubmit={onSubmit} className="space-y-3">
-        <label className="block text-sm font-medium">
-          Name
-          <Input 
-            value={name} 
-            onChange={(e) => setName(e.target.value)} 
-            placeholder="My Project" 
-            disabled={loading}
-          />
-        </label>
-        <label className="block text-sm font-medium">
-          Description (optional)
-          <Input 
-            value={description} 
-            onChange={(e) => setDescription(e.target.value)} 
-            placeholder="A brief description of the project" 
-            disabled={loading}
-          />
-        </label>
-        <Button type="submit" disabled={loading}>
-          {loading ? 'Creating...' : 'Create'}
-        </Button>
-      </form>
-{error ? <div className="mt-3"><ErrorState title="Error" description={error} /></div> : null}
-{created ? <Alert variant="success" className="mt-3">{created}</Alert> : null}
-      </CardContent>
-    </Card>
+    <div className="max-w-lg space-y-4">
+      {/* Header */}
+      <div className="border-b border-[var(--hud-border-subtle)] pb-3">
+        <div className="label-overline mb-0.5">// Projects / New</div>
+        <h1>New Project</h1>
+      </div>
+
+      {/* Form */}
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+        <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
+          <div className="h-1.5 w-1.5 bg-[var(--hud-accent)]" />
+          <span className="label-overline">Configuration</span>
+        </div>
+        <form onSubmit={onSubmit} className="p-4 space-y-4">
+          <div className="space-y-1.5">
+            <label htmlFor="proj-name" className="label-overline block">
+              Project Name <span className="text-[var(--hud-danger-text)]">*</span>
+            </label>
+            <Input
+              id="proj-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="my-project"
+              disabled={loading}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="proj-desc" className="label-overline block">
+              Description <span className="text-[var(--hud-text-muted)]">(optional)</span>
+            </label>
+            <Input
+              id="proj-desc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Brief description of project scope"
+              disabled={loading}
+            />
+          </div>
+
+          {error && <ErrorState title="Error" description={error} />}
+          {created && <Alert variant="success">{created}</Alert>}
+
+          <div className="flex items-center gap-2 pt-1">
+            <Button type="submit" disabled={loading}>
+              {loading ? 'Creating…' : 'Create Project'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => navigate('/projects')}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
