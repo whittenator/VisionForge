@@ -7,7 +7,15 @@ export default function Input({ className, ...props }: InputProps) {
   return (
     <input
       className={cn(
-        'flex h-9 w-full rounded-md border border-gray-300 bg-white px-3 py-1 text-sm ring-offset-white placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50',
+        'flex h-8 w-full',
+        'border border-[var(--hud-border-default)] bg-[var(--hud-inset)]',
+        'px-3 py-1 text-sm text-[var(--hud-text-primary)]',
+        'font-[var(--hud-font-mono)] placeholder:font-[var(--hud-font-sans)]',
+        'placeholder:text-[var(--hud-text-muted)]',
+        'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--hud-accent)]',
+        'focus-visible:border-[var(--hud-border-accent)]',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        'transition-colors duration-100',
         className
       )}
       {...props}

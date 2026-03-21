@@ -6,24 +6,41 @@ import { apiGet, apiPost, apiUrl } from '../../services/api';
 // Constants
 // ---------------------------------------------------------------------------
 
+// Muted HUD palette: no pure neon, no gaming colors
 const CLASS_COLORS = [
-  '#ef4444',
-  '#3b82f6',
-  '#22c55e',
-  '#f59e0b',
-  '#8b5cf6',
-  '#ec4899',
-  '#06b6d4',
-  '#84cc16',
-  '#f97316',
-  '#6366f1',
+  'oklch(0.72 0.10 82)',   // amber/olive (accent)
+  'oklch(0.60 0.10 155)', // muted green
+  'oklch(0.68 0.16 20)',  // brick red
+  'oklch(0.72 0.08 230)', // slate blue
+  'oklch(0.70 0.10 75)',  // warm amber
+  'oklch(0.65 0.10 200)', // teal
+  'oklch(0.62 0.10 100)', // yellow-green
+  'oklch(0.58 0.12 310)', // muted purple
+  'oklch(0.68 0.10 40)',  // orange
+  'oklch(0.60 0.08 180)', // cyan
 ];
 
 const MAX_CANVAS_W = 800;
 const MAX_CANVAS_H = 600;
 
+// HUD color tokens as canvas-compatible values
+const HUD = {
+  base:         'oklch(0.10 0.008 240)',
+  surface:      'oklch(0.14 0.008 240)',
+  elevated:     'oklch(0.18 0.008 240)',
+  inset:        'oklch(0.09 0.008 240)',
+  borderSubtle: 'oklch(0.20 0.006 240)',
+  borderDefault:'oklch(0.26 0.006 240)',
+  textMuted:    'oklch(0.42 0.008 240)',
+  textSecondary:'oklch(0.65 0.008 240)',
+  textData:     'oklch(0.96 0.003 240)',
+  accent:       'oklch(0.72 0.10 82)',
+  success:      'oklch(0.60 0.10 155)',
+  danger:       'oklch(0.52 0.16 20)',
+};
+
 // ---------------------------------------------------------------------------
-// Small API helpers for methods not yet in api.ts
+// Small API helpers
 // ---------------------------------------------------------------------------
 
 async function apiPut(path, body) {
@@ -34,11 +51,7 @@ async function apiPut(path, body) {
   });
   if (!res.ok) {
     let detail;
-    try {
-      detail = await res.json();
-    } catch {
-      detail = undefined;
-    }
+    try { detail = await res.json(); } catch { detail = undefined; }
     throw new Error(detail?.detail || `Request failed with ${res.status}`);
   }
   return res.json();
@@ -48,20 +61,15 @@ async function apiDelete(path) {
   const res = await fetch(apiUrl(path), { method: 'DELETE' });
   if (!res.ok) {
     let detail;
-    try {
-      detail = await res.json();
-    } catch {
-      detail = undefined;
-    }
+    try { detail = await res.json(); } catch { detail = undefined; }
     throw new Error(detail?.detail || `Request failed with ${res.status}`);
   }
-  // DELETE may return 204 No Content
   if (res.status === 204) return null;
   return res.json();
 }
 
 // ---------------------------------------------------------------------------
-// Utility: color for a class name given a class list
+// Utility
 // ---------------------------------------------------------------------------
 
 function classColor(className, classes) {
@@ -77,25 +85,19 @@ export default function AnnotatorPage() {
   const { assetId } = useParams();
   const navigate = useNavigate();
 
-  // --- Core state ---
   const [asset, setAsset] = useState(null);
   const [annotations, setAnnotations] = useState([]);
   const [classes, setClasses] = useState(['object']);
   const [selectedClass, setSelectedClass] = useState('object');
   const [selectedAnnotationIdx, setSelectedAnnotationIdx] = useState(null);
-  const [mode, setMode] = useState('box'); // 'box' | 'classify' | 'select'
+  const [mode, setMode] = useState('box');
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState('Loading…');
   const [newClassName, setNewClassName] = useState('');
   const [imageError, setImageError] = useState(false);
-
-  // Scale: canvas coords = image coords * scaleFactor
   const [scaleFactor, setScaleFactor] = useState(1);
 
-  // Drawing state (kept in a ref to avoid stale-closure issues in mouse handlers)
   const drawingRef = useRef({ active: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
-
-  // Refs
   const canvasRef = useRef(null);
   const imageRef = useRef(new Image());
   const annotationsRef = useRef(annotations);
@@ -105,7 +107,6 @@ export default function AnnotatorPage() {
   const selectedClassRef = useRef(selectedClass);
   const modeRef = useRef(mode);
 
-  // Keep refs in sync with state (needed for mouse-event closures)
   useEffect(() => { annotationsRef.current = annotations; }, [annotations]);
   useEffect(() => { selectedIdxRef.current = selectedAnnotationIdx; }, [selectedAnnotationIdx]);
   useEffect(() => { scaleRef.current = scaleFactor; }, [scaleFactor]);
@@ -130,88 +131,75 @@ export default function AnnotatorPage() {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw image
     if (img.complete && img.naturalWidth > 0) {
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     } else {
-      ctx.fillStyle = '#1e293b';
+      ctx.fillStyle = HUD.inset;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '14px sans-serif';
+      ctx.fillStyle = HUD.textMuted;
+      ctx.font = '12px monospace';
       ctx.textAlign = 'center';
       ctx.fillText('Loading image…', canvas.width / 2, canvas.height / 2);
       ctx.textAlign = 'left';
     }
 
-    // Draw annotations
     anns.forEach((ann, idx) => {
       if (ann.type !== 'box') return;
       const { x, y, w, h } = ann.geometry;
       const color = classColor(ann.class_name, cls);
-      const cx = x * sf;
-      const cy = y * sf;
-      const cw = w * sf;
-      const ch = h * sf;
+      const cx = x * sf, cy = y * sf, cw = w * sf, ch = h * sf;
 
       ctx.strokeStyle = color;
-      ctx.lineWidth = idx === selIdx ? 3 : 2;
+      ctx.lineWidth = idx === selIdx ? 2 : 1.5;
       ctx.setLineDash([]);
       ctx.strokeRect(cx, cy, cw, ch);
 
-      // Label background
+      // Label
       const label = ann.class_name;
-      ctx.font = '11px sans-serif';
-      const textW = ctx.measureText(label).width + 6;
+      ctx.font = '10px monospace';
+      const textW = ctx.measureText(label).width + 8;
       ctx.fillStyle = color;
-      ctx.fillRect(cx, cy - 16, textW, 16);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(label, cx + 3, cy - 3);
+      ctx.globalAlpha = 0.9;
+      ctx.fillRect(cx, cy - 14, textW, 14);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = HUD.base;
+      ctx.fillText(label, cx + 4, cy - 3);
 
-      // Resize handles for selected annotation
+      // Selection handles
       if (idx === selIdx) {
         const handles = [
-          [cx, cy],
-          [cx + cw / 2, cy],
-          [cx + cw, cy],
-          [cx + cw, cy + ch / 2],
-          [cx + cw, cy + ch],
-          [cx + cw / 2, cy + ch],
-          [cx, cy + ch],
-          [cx, cy + ch / 2],
+          [cx, cy], [cx + cw / 2, cy], [cx + cw, cy],
+          [cx + cw, cy + ch / 2], [cx + cw, cy + ch],
+          [cx + cw / 2, cy + ch], [cx, cy + ch], [cx, cy + ch / 2],
         ];
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = HUD.textData;
         ctx.strokeStyle = color;
         ctx.lineWidth = 1;
         handles.forEach(([hx, hy]) => {
           ctx.beginPath();
-          ctx.arc(hx, hy, 4, 0, Math.PI * 2);
+          ctx.rect(hx - 3, hy - 3, 6, 6);
           ctx.fill();
           ctx.stroke();
         });
       }
     });
 
-    // Draw active drawing preview
     if (drawing.active) {
       const { startX, startY, currentX, currentY } = drawing;
-      ctx.strokeStyle = '#00ff00';
+      ctx.strokeStyle = HUD.accent;
       ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
+      ctx.setLineDash([3, 3]);
       ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
       ctx.setLineDash([]);
     }
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Load asset + annotations on mount / assetId change
+  // Load asset
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
-    if (!assetId) {
-      setStatus('No asset selected. Navigate from the dataset view.');
-      return;
-    }
-
+    if (!assetId) { setStatus('No asset selected.'); return; }
     setStatus('Loading…');
     setAnnotations([]);
     setSelectedAnnotationIdx(null);
@@ -222,36 +210,23 @@ export default function AnnotatorPage() {
       try {
         const assetData = await apiGet(`/api/assets/${assetId}`);
         setAsset(assetData);
-
-        // Load existing annotations
         try {
           const annsData = await apiGet(`/api/assets/${assetId}/annotations`);
           const loaded = Array.isArray(annsData) ? annsData : (annsData.items ?? []);
           setAnnotations(loaded.map((a) => ({ ...a, isNew: false })));
-
-          // Populate classes from existing annotations
           const existingClasses = loaded.map((a) => a.class_name).filter(Boolean);
           if (existingClasses.length > 0) {
-            setClasses((prev) => {
-              const merged = Array.from(new Set([...prev, ...existingClasses]));
-              return merged;
-            });
+            setClasses((prev) => Array.from(new Set([...prev, ...existingClasses])));
           }
-        } catch {
-          // Annotations may not exist yet; that's fine
-          setAnnotations([]);
-        }
-
+        } catch { setAnnotations([]); }
         setStatus('Ready');
-
-        // Load image
         const img = imageRef.current;
         img.crossOrigin = 'anonymous';
         img.onload = () => {
           const canvas = canvasRef.current;
           if (!canvas) return;
           const sf = Math.min(MAX_CANVAS_W / img.naturalWidth, MAX_CANVAS_H / img.naturalHeight, 1);
-          canvas.width = Math.round(img.naturalWidth * sf);
+          canvas.width  = Math.round(img.naturalWidth * sf);
           canvas.height = Math.round(img.naturalHeight * sf);
           setScaleFactor(sf);
           scaleRef.current = sf;
@@ -268,17 +243,13 @@ export default function AnnotatorPage() {
         };
         img.src = assetData.uri || apiUrl(`/api/assets/${assetId}/file`);
       } catch (err) {
-        setStatus(`Error loading asset: ${err.message}`);
+        setStatus(`Error: ${err.message}`);
       }
     }
-
     load();
   }, [assetId, redraw]);
 
-  // Re-draw when annotations or selection changes
-  useEffect(() => {
-    redraw();
-  }, [annotations, selectedAnnotationIdx, scaleFactor, redraw]);
+  useEffect(() => { redraw(); }, [annotations, selectedAnnotationIdx, scaleFactor, redraw]);
 
   // ---------------------------------------------------------------------------
   // Mouse handlers
@@ -287,37 +258,28 @@ export default function AnnotatorPage() {
   function canvasCoords(e) {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
   function hitTestAnnotation(cx, cy) {
     const anns = annotationsRef.current;
     const sf = scaleRef.current;
-    // Iterate in reverse so topmost box wins
     for (let i = anns.length - 1; i >= 0; i--) {
       const ann = anns[i];
       if (ann.type !== 'box') continue;
       const { x, y, w, h } = ann.geometry;
-      if (cx >= x * sf && cx <= (x + w) * sf && cy >= y * sf && cy <= (y + h) * sf) {
-        return i;
-      }
+      if (cx >= x * sf && cx <= (x + w) * sf && cy >= y * sf && cy <= (y + h) * sf) return i;
     }
     return null;
   }
 
   function handleMouseDown(e) {
     const { x, y } = canvasCoords(e);
-    const currentMode = modeRef.current;
-
-    if (currentMode === 'box') {
+    if (modeRef.current === 'box') {
       drawingRef.current = { active: true, startX: x, startY: y, currentX: x, currentY: y };
       redraw();
-    } else if (currentMode === 'select') {
-      const idx = hitTestAnnotation(x, y);
-      setSelectedAnnotationIdx(idx);
+    } else if (modeRef.current === 'select') {
+      setSelectedAnnotationIdx(hitTestAnnotation(x, y));
     }
   }
 
@@ -328,61 +290,36 @@ export default function AnnotatorPage() {
     redraw();
   }
 
-  function handleMouseUp(e) {
+  function handleMouseUp() {
     if (!drawingRef.current.active) return;
     const { startX, startY, currentX, currentY } = drawingRef.current;
     drawingRef.current = { active: false, startX: 0, startY: 0, currentX: 0, currentY: 0 };
-
     const sf = scaleRef.current;
-    const rawX = Math.min(startX, currentX);
-    const rawY = Math.min(startY, currentY);
-    const rawW = Math.abs(currentX - startX);
-    const rawH = Math.abs(currentY - startY);
-
-    // Convert canvas coords back to image coords
-    const imgX = rawX / sf;
-    const imgY = rawY / sf;
-    const imgW = rawW / sf;
-    const imgH = rawH / sf;
-
-    // Minimum size check (10x10 in image coords)
-    if (imgW < 10 || imgH < 10) {
-      redraw();
-      return;
-    }
-
-    const chosenClass = selectedClassRef.current;
-    const newAnn = {
-      id: null,
-      type: 'box',
-      class_name: chosenClass,
-      geometry: { x: imgX, y: imgY, w: imgW, h: imgH },
-      isNew: true,
-    };
-
+    const rawX = Math.min(startX, currentX), rawY = Math.min(startY, currentY);
+    const rawW = Math.abs(currentX - startX), rawH = Math.abs(currentY - startY);
+    const imgX = rawX / sf, imgY = rawY / sf, imgW = rawW / sf, imgH = rawH / sf;
+    if (imgW < 10 || imgH < 10) { redraw(); return; }
+    const newAnn = { id: null, type: 'box', class_name: selectedClassRef.current, geometry: { x: imgX, y: imgY, w: imgW, h: imgH }, isNew: true };
     setAnnotations((prev) => {
       const updated = [...prev, newAnn];
       annotationsRef.current = updated;
       return updated;
     });
-    setSelectedAnnotationIdx(annotationsRef.current.length); // will be last index after update
+    setSelectedAnnotationIdx(annotationsRef.current.length);
     setDirty(true);
     redraw();
   }
 
   // ---------------------------------------------------------------------------
-  // Keyboard handler
+  // Keyboard
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
     function onKeyDown(e) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Only delete if not typing in an input
         if (e.target.tagName === 'INPUT') return;
         const idx = selectedIdxRef.current;
-        if (idx !== null) {
-          deleteAnnotation(idx);
-        }
+        if (idx !== null) deleteAnnotation(idx);
       } else if (e.key === 'Escape') {
         drawingRef.current = { active: false, startX: 0, startY: 0, currentX: 0, currentY: 0 };
         setSelectedAnnotationIdx(null);
@@ -401,10 +338,7 @@ export default function AnnotatorPage() {
     setAnnotations((prev) => {
       const ann = prev[idx];
       if (!ann) return prev;
-      // If it has a server id, schedule deletion (fire-and-forget)
-      if (ann.id) {
-        apiDelete(`/api/annotations/${ann.id}`).catch(() => {});
-      }
+      if (ann.id) apiDelete(`/api/annotations/${ann.id}`).catch(() => {});
       const updated = prev.filter((_, i) => i !== idx);
       annotationsRef.current = updated;
       return updated;
@@ -422,33 +356,18 @@ export default function AnnotatorPage() {
     setDirty(true);
   }
 
-  // ---------------------------------------------------------------------------
-  // Classification mode
-  // ---------------------------------------------------------------------------
-
   function applyClassification(className) {
     setAnnotations((prev) => {
-      // Remove any existing classification annotation, add new one
       const withoutClassify = prev.filter((a) => a.type !== 'classification');
-      const newAnn = {
-        id: null,
-        type: 'classification',
-        class_name: className,
-        geometry: { class: className },
-        isNew: true,
-      };
+      const newAnn = { id: null, type: 'classification', class_name: className, geometry: { class: className }, isNew: true };
       const updated = [...withoutClassify, newAnn];
       annotationsRef.current = updated;
       return updated;
     });
     setSelectedClass(className);
     setDirty(true);
-    setStatus(`Classification set to "${className}"`);
+    setStatus(`Classification → "${className}"`);
   }
-
-  // ---------------------------------------------------------------------------
-  // Save
-  // ---------------------------------------------------------------------------
 
   async function handleSave() {
     if (!assetId) return;
@@ -457,30 +376,14 @@ export default function AnnotatorPage() {
       const saved = [];
       for (const ann of annotationsRef.current) {
         if (ann.isNew || !ann.id) {
-          // POST new annotation
-          const body = {
-            asset_id: assetId,
-            type: ann.type,
-            class_name: ann.class_name,
-            geometry: ann.geometry,
-          };
-          const result = await apiPost('/api/annotations', body);
+          const result = await apiPost('/api/annotations', { asset_id: assetId, type: ann.type, class_name: ann.class_name, geometry: ann.geometry });
           saved.push({ ...ann, id: result.id, isNew: false });
         } else {
-          // PUT existing annotation
-          const body = { class_name: ann.class_name, geometry: ann.geometry };
-          await apiPut(`/api/annotations/${ann.id}`, body);
+          await apiPut(`/api/annotations/${ann.id}`, { class_name: ann.class_name, geometry: ann.geometry });
           saved.push({ ...ann, isNew: false });
         }
       }
-
-      // Update asset label_status
-      try {
-        await apiPut(`/api/assets/${assetId}`, { label_status: 'labeled' });
-      } catch {
-        // Non-fatal
-      }
-
+      try { await apiPut(`/api/assets/${assetId}`, { label_status: 'labeled' }); } catch { /* non-fatal */ }
       setAnnotations(saved);
       annotationsRef.current = saved;
       setDirty(false);
@@ -490,10 +393,6 @@ export default function AnnotatorPage() {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Class management
-  // ---------------------------------------------------------------------------
-
   function addClass() {
     const trimmed = newClassName.trim();
     if (!trimmed || classes.includes(trimmed)) return;
@@ -502,157 +401,177 @@ export default function AnnotatorPage() {
     setNewClassName('');
   }
 
-  // ---------------------------------------------------------------------------
-  // Navigation (prev/next asset — uses numeric offset if asset has dataset context)
-  // ---------------------------------------------------------------------------
-
   function navigateAsset(direction) {
     if (!asset) return;
-    if (dirty) {
-      if (!window.confirm('You have unsaved changes. Leave anyway?')) return;
-    }
-    // Try to navigate using dataset_id + offset if available, otherwise rely on
-    // the parent component / URL. Here we emit a basic history navigation hint.
+    if (dirty && !window.confirm('You have unsaved changes. Leave anyway?')) return;
     const datasetId = asset.dataset_id;
-    if (datasetId) {
-      // Navigate to dataset view so user can pick the next asset
-      navigate(`/datasets/${datasetId}`);
-    } else {
-      setStatus(`Navigate ${direction === 1 ? 'next' : 'previous'} asset from the dataset view.`);
-    }
+    if (datasetId) { navigate(`/datasets/${datasetId}`); }
+    else { setStatus(`Navigate ${direction === 1 ? 'next' : 'previous'} from the dataset view.`); }
   }
-
-  // ---------------------------------------------------------------------------
-  // Render helpers
-  // ---------------------------------------------------------------------------
 
   if (!assetId) {
     return (
-      <div className="flex items-center justify-center h-64 text-slate-500" data-testid="annotator-container">
-        <p>No asset selected. Navigate here from the dataset view.</p>
+      <div className="flex items-center justify-center h-64 text-[var(--hud-text-muted)] font-mono text-sm" data-testid="annotator-container">
+        No asset selected. Navigate here from the dataset view.
       </div>
     );
   }
 
   const classificationAnn = annotations.find((a) => a.type === 'classification');
-  const boxAnnotations = annotations.filter((a) => a.type === 'box');
+  const boxAnnotations    = annotations.filter((a) => a.type === 'box');
+
+  // Toolbar button helper
+  const toolBtn = (label, active, onClick, ariaLabel, ariaPressed) => (
+    <button
+      onClick={onClick}
+      aria-pressed={ariaPressed !== undefined ? ariaPressed : active}
+      aria-label={ariaLabel}
+      className={[
+        'px-3 h-6 text-[0.6875rem] font-mono tracking-widest border transition-colors',
+        active
+          ? 'bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)] border-[var(--hud-accent)]'
+          : 'bg-transparent text-[var(--hud-text-secondary)] border-[var(--hud-border-default)] hover:border-[var(--hud-border-accent)] hover:text-[var(--hud-accent)]',
+      ].join(' ')}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <div
-      className="flex flex-col h-full bg-slate-900 text-slate-100 select-none"
+      className="flex flex-col"
+      style={{ height: 'calc(100vh - 90px)', background: 'var(--hud-base)' }}
       data-testid="annotator-container"
       role="application"
       aria-label="Annotator"
     >
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 border-b border-slate-700 text-sm flex-wrap">
-        <button
-          onClick={() => setMode('box')}
-          className={`px-3 py-1 rounded font-medium ${mode === 'box' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
-          aria-pressed={mode === 'box'}
-        >
-          Box
-        </button>
-        <button
-          onClick={() => setMode('classify')}
-          className={`px-3 py-1 rounded font-medium ${mode === 'classify' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
-          aria-pressed={mode === 'classify'}
-        >
-          Classify
-        </button>
-        <button
-          onClick={() => setMode('select')}
-          className={`px-3 py-1 rounded font-medium ${mode === 'select' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
-          aria-pressed={mode === 'select'}
-        >
-          Select
-        </button>
-        <div className="w-px h-5 bg-slate-600 mx-1" />
+      <div
+        className="flex items-center gap-1.5 px-3 border-b flex-wrap flex-shrink-0"
+        style={{
+          height: '36px',
+          borderColor: 'var(--hud-border-default)',
+          background: 'var(--hud-surface)',
+        }}
+      >
+        {/* Mode tools */}
+        {toolBtn('BOX',      mode === 'box',      () => setMode('box'),      'Box mode')}
+        {toolBtn('CLASSIFY', mode === 'classify', () => setMode('classify'), 'Classify mode')}
+        {toolBtn('SELECT',   mode === 'select',   () => setMode('select'),   'Select mode')}
+
+        <div className="w-px h-4 mx-1" style={{ background: 'var(--hud-border-strong)' }} />
+
+        {/* Save */}
         <button
           onClick={handleSave}
           disabled={!dirty}
-          className={`px-3 py-1 rounded font-medium ${dirty ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
+          className={[
+            'px-3 h-6 text-[0.6875rem] font-mono tracking-widest border transition-colors',
+            dirty
+              ? 'bg-[var(--hud-success-dim)] text-[var(--hud-success-text)] border-[var(--hud-success)] hover:bg-[var(--hud-success)] hover:text-[oklch(0.10_0.008_240)]'
+              : 'opacity-30 border-[var(--hud-border-default)] text-[var(--hud-text-muted)] cursor-not-allowed',
+          ].join(' ')}
         >
-          Save
+          SAVE
         </button>
-        <div className="w-px h-5 bg-slate-600 mx-1" />
-        <button
-          onClick={() => navigateAsset(-1)}
-          className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600"
-          aria-label="Previous asset"
-        >
-          ← Prev
-        </button>
-        <button
-          onClick={() => navigateAsset(1)}
-          className="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600"
-          aria-label="Next asset"
-        >
-          Next →
-        </button>
-        <span className="ml-2 text-slate-400">
-          Asset: <span data-testid="asset-id" className="text-slate-200 font-mono text-xs">{assetId}</span>
+
+        <div className="w-px h-4 mx-1" style={{ background: 'var(--hud-border-strong)' }} />
+
+        {toolBtn('← PREV', false, () => navigateAsset(-1), 'Previous asset')}
+        {toolBtn('NEXT →', false, () => navigateAsset(1),  'Next asset')}
+
+        <span className="ml-2 text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">
+          ASSET <span data-testid="asset-id" style={{ color: 'var(--hud-text-data)' }}>{assetId}</span>
         </span>
-        {dirty && <span className="ml-auto text-yellow-400 text-xs">Unsaved changes</span>}
+
+        {dirty && (
+          <span className="ml-auto text-[0.6875rem] font-mono pulse-active" style={{ color: 'var(--hud-warning-text)' }}>
+            ● UNSAVED
+          </span>
+        )}
       </div>
 
-      {/* Main content */}
+      {/* Content row */}
       <div className="flex flex-1 overflow-hidden min-h-0">
         {/* Left sidebar — Classes */}
-        <div className="w-44 flex-shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col p-2 gap-1 overflow-y-auto">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Classes</p>
+        <div
+          className="flex-shrink-0 flex flex-col gap-1 p-2 overflow-y-auto border-r"
+          style={{ width: '152px', background: 'var(--hud-surface)', borderColor: 'var(--hud-border-default)' }}
+        >
+          <p className="label-overline mb-1">Classes</p>
+
           {classes.map((cls, i) => (
             <button
               key={cls}
               onClick={() => setSelectedClass(cls)}
-              className={`flex items-center gap-2 px-2 py-1 rounded text-sm text-left w-full ${selectedClass === cls ? 'bg-slate-600 text-white' : 'hover:bg-slate-700 text-slate-300'}`}
+              className="flex items-center gap-2 px-2 py-1 text-[0.75rem] text-left w-full border transition-colors"
+              style={{
+                borderColor: selectedClass === cls ? CLASS_COLORS[i % CLASS_COLORS.length] : 'var(--hud-border-default)',
+                background: selectedClass === cls ? 'var(--hud-elevated)' : 'transparent',
+                color: selectedClass === cls ? 'var(--hud-text-primary)' : 'var(--hud-text-muted)',
+              }}
               aria-pressed={selectedClass === cls}
             >
               <span
-                className="inline-block w-3 h-3 rounded-full flex-shrink-0"
-                style={{ backgroundColor: CLASS_COLORS[i % CLASS_COLORS.length] }}
+                className="inline-block w-2 h-2 flex-shrink-0"
+                style={{ background: CLASS_COLORS[i % CLASS_COLORS.length] }}
               />
-              <span className="truncate">{cls}</span>
+              <span className="truncate font-mono text-xs">{cls}</span>
             </button>
           ))}
 
           {/* Add class */}
-          <div className="mt-2 flex flex-col gap-1">
+          <div className="mt-2 space-y-1">
             <input
               type="text"
               value={newClassName}
               onChange={(e) => setNewClassName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addClass()}
-              placeholder="New class…"
-              className="w-full px-2 py-1 rounded bg-slate-700 border border-slate-600 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              placeholder="new class…"
               aria-label="New class name"
+              className="w-full px-2 py-1 text-xs font-mono border focus:outline-none"
+              style={{
+                background: 'var(--hud-inset)',
+                borderColor: 'var(--hud-border-default)',
+                color: 'var(--hud-text-primary)',
+              }}
             />
             <button
               onClick={addClass}
               disabled={!newClassName.trim()}
-              className="w-full px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs text-slate-300 disabled:opacity-40"
+              className="w-full px-2 py-1 text-[0.6875rem] font-mono border transition-colors disabled:opacity-30"
+              style={{
+                background: 'transparent',
+                borderColor: 'var(--hud-border-default)',
+                color: 'var(--hud-text-muted)',
+              }}
             >
-              + Add class
+              + ADD CLASS
             </button>
           </div>
 
-          {/* Classification mode: show class buttons prominently */}
+          {/* Classification mode */}
           {mode === 'classify' && (
-            <div className="mt-3 border-t border-slate-700 pt-2">
-              <p className="text-xs text-slate-400 mb-1">Set classification:</p>
+            <div className="mt-3 border-t pt-2" style={{ borderColor: 'var(--hud-border-default)' }}>
+              <p className="label-overline mb-1">Set class:</p>
               {classes.map((cls, i) => (
                 <button
                   key={cls}
                   onClick={() => applyClassification(cls)}
-                  className={`flex items-center gap-2 px-2 py-1 rounded text-sm text-left w-full mb-1 font-medium ${classificationAnn?.class_name === cls ? 'ring-2 ring-blue-400 bg-slate-600' : 'bg-slate-700 hover:bg-slate-600'}`}
-                  style={{ borderLeft: `3px solid ${CLASS_COLORS[i % CLASS_COLORS.length]}` }}
+                  className="flex items-center gap-2 px-2 py-1 text-xs font-mono text-left w-full mb-1 border transition-colors"
+                  style={{
+                    borderColor: classificationAnn?.class_name === cls ? CLASS_COLORS[i % CLASS_COLORS.length] : 'var(--hud-border-default)',
+                    background: classificationAnn?.class_name === cls ? 'var(--hud-elevated)' : 'transparent',
+                    color: 'var(--hud-text-secondary)',
+                    borderLeft: `2px solid ${CLASS_COLORS[i % CLASS_COLORS.length]}`,
+                  }}
                 >
                   <span className="truncate">{cls}</span>
                 </button>
               ))}
               {classificationAnn && (
-                <p className="text-xs text-green-400 mt-1">
-                  Current: {classificationAnn.class_name}
+                <p className="text-[0.6875rem] font-mono mt-1" style={{ color: 'var(--hud-success-text)' }}>
+                  ✓ {classificationAnn.class_name}
                 </p>
               )}
             </div>
@@ -660,17 +579,31 @@ export default function AnnotatorPage() {
         </div>
 
         {/* Canvas area */}
-        <div className="flex-1 flex items-center justify-center overflow-auto bg-slate-950 p-2">
+        <div
+          className="flex-1 flex items-center justify-center overflow-auto p-3"
+          style={{ background: 'var(--hud-inset)' }}
+        >
           {imageError ? (
-            <div className="flex flex-col items-center gap-2 text-slate-400">
-              <div className="w-24 h-24 bg-slate-800 rounded flex items-center justify-center text-4xl">?</div>
-              <p className="text-sm">Image could not be loaded</p>
-              <p className="text-xs font-mono text-slate-500">{assetId}</p>
+            <div className="flex flex-col items-center gap-2" style={{ color: 'var(--hud-text-muted)' }}>
+              <div
+                className="w-24 h-24 flex items-center justify-center text-3xl font-mono border"
+                style={{ background: 'var(--hud-surface)', borderColor: 'var(--hud-border-default)' }}
+              >
+                ?
+              </div>
+              <p className="text-xs font-mono">Image could not be loaded</p>
+              <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--hud-text-muted)' }}>{assetId}</p>
             </div>
           ) : (
             <canvas
               ref={canvasRef}
-              className={`border border-slate-700 ${mode === 'box' ? 'cursor-crosshair' : mode === 'select' ? 'cursor-pointer' : 'cursor-default'}`}
+              className={mode === 'box' ? 'cursor-crosshair' : mode === 'select' ? 'cursor-pointer' : 'cursor-default'}
+              style={{
+                display: 'block',
+                maxWidth: '100%',
+                maxHeight: '100%',
+                border: `1px solid var(--hud-border-default)`,
+              }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
@@ -680,61 +613,65 @@ export default function AnnotatorPage() {
                   redraw();
                 }
               }}
-              style={{ display: 'block', maxWidth: '100%', maxHeight: '100%' }}
               data-testid="annotation-canvas"
             />
           )}
         </div>
 
         {/* Right sidebar — Annotation list */}
-        <div className="w-52 flex-shrink-0 bg-slate-800 border-l border-slate-700 flex flex-col p-2 gap-1 overflow-y-auto">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">
-            Annotations ({annotations.length})
+        <div
+          className="flex-shrink-0 flex flex-col gap-0.5 p-2 overflow-y-auto border-l"
+          style={{ width: '176px', background: 'var(--hud-surface)', borderColor: 'var(--hud-border-default)' }}
+        >
+          <p className="label-overline mb-1">
+            Annotations <span className="text-[var(--hud-accent)]">{annotations.length}</span>
           </p>
 
           {annotations.length === 0 && (
-            <p className="text-xs text-slate-500 italic">No annotations yet.</p>
+            <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--hud-text-muted)' }}>
+              No annotations yet.
+            </p>
           )}
 
           {annotations.map((ann, idx) => (
             <div
               key={idx}
-              onClick={() => {
-                if (ann.type === 'box') {
-                  setSelectedAnnotationIdx(idx === selectedAnnotationIdx ? null : idx);
-                }
+              onClick={() => { if (ann.type === 'box') setSelectedAnnotationIdx(idx === selectedAnnotationIdx ? null : idx); }}
+              className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer group border transition-colors"
+              style={{
+                borderColor: idx === selectedAnnotationIdx ? 'var(--hud-accent)' : 'transparent',
+                background: idx === selectedAnnotationIdx ? 'var(--hud-elevated)' : 'transparent',
               }}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer group ${idx === selectedAnnotationIdx ? 'bg-slate-600 ring-1 ring-blue-400' : 'hover:bg-slate-700'}`}
               role="option"
               aria-selected={idx === selectedAnnotationIdx}
             >
               <span
-                className="inline-block w-2 h-2 rounded-full flex-shrink-0"
-                style={{ backgroundColor: classColor(ann.class_name, classes) }}
+                className="inline-block w-2 h-2 flex-shrink-0"
+                style={{ background: classColor(ann.class_name, classes) }}
               />
-              <span className="flex-1 truncate text-slate-300">
-                {ann.type === 'classification' ? 'cls' : 'box'}: {ann.class_name}
+              <span className="flex-1 truncate font-mono text-[0.6875rem]" style={{ color: 'var(--hud-text-secondary)' }}>
+                {ann.type === 'classification' ? 'CLS' : 'BOX'}: {ann.class_name}
               </span>
-              {/* Class change select for box annotations */}
               {ann.type === 'box' && idx === selectedAnnotationIdx && (
                 <select
                   value={ann.class_name}
                   onChange={(e) => setAnnotationClass(idx, e.target.value)}
                   onClick={(e) => e.stopPropagation()}
-                  className="text-xs bg-slate-700 border border-slate-500 rounded px-1 py-0 text-slate-200 max-w-[70px]"
                   aria-label="Change class"
+                  className="text-[0.6875rem] font-mono max-w-[60px] border focus:outline-none"
+                  style={{
+                    background: 'var(--hud-inset)',
+                    borderColor: 'var(--hud-border-default)',
+                    color: 'var(--hud-text-primary)',
+                  }}
                 >
-                  {classes.map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
+                  {classes.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               )}
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteAnnotation(idx);
-                }}
-                className="ml-auto text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                onClick={(e) => { e.stopPropagation(); deleteAnnotation(idx); }}
+                className="ml-auto text-[0.6875rem] font-mono opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                style={{ color: 'var(--hud-danger-text)' }}
                 aria-label={`Delete annotation ${idx}`}
                 title="Delete"
               >
@@ -746,19 +683,37 @@ export default function AnnotatorPage() {
       </div>
 
       {/* Status bar */}
-      <div className="px-3 py-1 bg-slate-800 border-t border-slate-700 text-xs text-slate-400 flex items-center gap-3">
-        <span aria-live="polite" data-testid="status">
+      <div
+        className="px-3 flex items-center gap-4 border-t flex-shrink-0"
+        style={{
+          height: '28px',
+          background: 'var(--hud-surface)',
+          borderColor: 'var(--hud-border-default)',
+        }}
+      >
+        <span
+          className="text-[0.6875rem] font-mono"
+          aria-live="polite"
+          data-testid="status"
+          style={{ color: 'var(--hud-text-muted)' }}
+        >
           {status}
         </span>
-        <span className="ml-auto">
-          Mode: <span data-testid="mode" className="text-slate-200">{mode}</span>
+        <span className="ml-auto text-[0.6875rem] font-mono" style={{ color: 'var(--hud-text-muted)' }}>
+          MODE <span data-testid="mode" style={{ color: 'var(--hud-text-data)' }}>{mode.toUpperCase()}</span>
         </span>
         {scaleFactor !== 1 && (
-          <span>Scale: {Math.round(scaleFactor * 100)}%</span>
+          <span className="text-[0.6875rem] font-mono" style={{ color: 'var(--hud-text-muted)' }}>
+            SCALE <span style={{ color: 'var(--hud-text-data)' }}>{Math.round(scaleFactor * 100)}%</span>
+          </span>
         )}
-        <span>
-          {boxAnnotations.length} box{boxAnnotations.length !== 1 ? 'es' : ''}
-          {classificationAnn ? ` · classified: ${classificationAnn.class_name}` : ''}
+        <span className="text-[0.6875rem] font-mono" style={{ color: 'var(--hud-text-muted)' }}>
+          <span style={{ color: 'var(--hud-text-data)' }}>{boxAnnotations.length}</span> box{boxAnnotations.length !== 1 ? 'es' : ''}
+          {classificationAnn && (
+            <span className="ml-2" style={{ color: 'var(--hud-success-text)' }}>
+              ✓ {classificationAnn.class_name}
+            </span>
+          )}
         </span>
       </div>
     </div>

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Loading from '@/components/common/Loading';
 import EmptyState from '@/components/common/EmptyState';
@@ -24,40 +23,63 @@ export default function ProjectsIndex() {
   }, []);
 
   return (
-    <>
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold">Projects</h2>
+    <div className="space-y-4">
+      {/* Page header */}
+      <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] pb-3">
+        <div>
+          <div className="label-overline mb-0.5">// Projects</div>
+          <h1>Projects</h1>
+        </div>
         <Button as-child="true">
           {/* @ts-expect-error allow as-child semantics via attribute only */}
-          <Link to="/projects/create">New Project</Link>
+          <Link to="/projects/create">+ New Project</Link>
         </Button>
       </div>
+
       {loading ? (
-        <div className="mt-4"><Loading label="Loading projects" /></div>
+        <div className="py-6"><Loading label="Loading projects…" /></div>
       ) : projects.length === 0 ? (
-        <div className="mt-4">
-          <EmptyState title="No projects" description="Create your first project to begin.">
-            <Button as-child="true">
-              {/* @ts-expect-error allow as-child semantics via attribute only */}
-              <Link to="/projects/create">New Project</Link>
-            </Button>
-          </EmptyState>
-        </div>
+        <EmptyState
+          title="No projects"
+          description="Create your first project to begin managing datasets and training runs."
+        >
+          <Button as-child="true">
+            {/* @ts-expect-error allow as-child semantics via attribute only */}
+            <Link to="/projects/create">+ New Project</Link>
+          </Button>
+        </EmptyState>
       ) : (
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-px sm:grid-cols-2 lg:grid-cols-3 bg-[var(--hud-border-default)]">
           {projects.map((p) => (
-            <Card key={p.id}>
-              <CardHeader>
-                <CardTitle>{p.name}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p>{p.description}</p>
-                <Link className="text-blue-700 underline" to={`/projects/${p.id}`}>Open dashboard</Link>
-              </CardContent>
-            </Card>
+            <div
+              key={p.id}
+              className="bg-[var(--hud-surface)] p-4 flex flex-col gap-2 hover:bg-[var(--hud-elevated)] transition-colors group"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="text-[0.625rem] font-mono text-[var(--hud-text-muted)] tracking-widest uppercase">
+                  PROJECT
+                </div>
+              </div>
+              <div className="font-semibold text-sm text-[var(--hud-text-primary)] tracking-wide">
+                {p.name}
+              </div>
+              {p.description && (
+                <p className="text-xs text-[var(--hud-text-muted)] leading-relaxed line-clamp-2">
+                  {p.description}
+                </p>
+              )}
+              <div className="mt-auto pt-2 border-t border-[var(--hud-border-subtle)]">
+                <Link
+                  to={`/projects/${p.id}`}
+                  className="text-xs font-mono text-[var(--hud-accent)] hover:text-[var(--hud-accent-hover)] tracking-wide transition-colors"
+                >
+                  OPEN DASHBOARD →
+                </Link>
+              </div>
+            </div>
           ))}
         </div>
       )}
-    </>
+    </div>
   );
 }

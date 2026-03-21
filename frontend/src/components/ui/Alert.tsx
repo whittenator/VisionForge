@@ -1,18 +1,28 @@
 import React from 'react';
+import { cn } from '@/lib/utils';
 
 type AlertProps = React.HTMLAttributes<HTMLDivElement> & {
   variant?: 'info' | 'success' | 'warning' | 'error';
 };
 
+const variantStyles = {
+  info:    'bg-[var(--hud-info-dim)] text-[var(--hud-info-text)] border-[var(--hud-info)] border-l-2',
+  success: 'bg-[var(--hud-success-dim)] text-[var(--hud-success-text)] border-[var(--hud-success)] border-l-2',
+  warning: 'bg-[var(--hud-warning-dim)] text-[var(--hud-warning-text)] border-[var(--hud-warning)] border-l-2',
+  error:   'bg-[var(--hud-danger-dim)] text-[var(--hud-danger-text)] border-[var(--hud-danger)] border-l-2',
+} as const;
+
 export default function Alert({ variant = 'info', className = '', children, ...props }: AlertProps) {
-  const variants = {
-    info: 'bg-blue-50 text-blue-900 border-blue-200',
-    success: 'bg-green-50 text-green-900 border-green-200',
-    warning: 'bg-yellow-50 text-yellow-900 border-yellow-200',
-    error: 'bg-red-50 text-red-900 border-red-200',
-  } as const;
   return (
-    <div className={`rounded border p-3 ${variants[variant]} ${className}`} role="status" {...props}>
+    <div
+      className={cn(
+        'border border-[var(--hud-border-default)] px-3 py-2.5 text-sm',
+        variantStyles[variant],
+        className
+      )}
+      role="status"
+      {...props}
+    >
       {children}
     </div>
   );

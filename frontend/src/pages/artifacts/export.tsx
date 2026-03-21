@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import Alert from '@/components/ui/Alert';
@@ -30,20 +29,20 @@ interface JobStatus {
 function statusVariant(status: string): 'default' | 'success' | 'warning' | 'danger' {
   switch (status) {
     case 'succeeded': return 'success';
-    case 'running': return 'warning';
-    case 'failed': return 'danger';
-    default: return 'default';
+    case 'running':   return 'warning';
+    case 'failed':    return 'danger';
+    default:          return 'default';
   }
 }
 
 export default function ArtifactsExport() {
   const { modelId } = useParams<{ modelId: string }>();
-  const [artifact, setArtifact] = useState<Lineage | null>(null);
+  const [artifact, setArtifact]           = useState<Lineage | null>(null);
   const [artifactLoading, setArtifactLoading] = useState(true);
   const [artifactError, setArtifactError] = useState<string | null>(null);
-  const [job, setJob] = useState<JobStatus | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [job, setJob]                     = useState<JobStatus | null>(null);
+  const [exporting, setExporting]         = useState(false);
+  const [error, setError]                 = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -54,11 +53,8 @@ export default function ArtifactsExport() {
       .finally(() => setArtifactLoading(false));
   }, [modelId]);
 
-  // Clean up polling interval on unmount
   useEffect(() => {
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
 
   async function pollJob(jobId: string) {
@@ -82,10 +78,7 @@ export default function ArtifactsExport() {
     setExporting(true);
     setError(null);
     try {
-      const j = await apiPost<{ id: string; status: string }>(
-        `/api/artifacts/models/${modelId}/export`,
-        {}
-      );
+      const j = await apiPost<{ id: string; status: string }>(`/api/artifacts/models/${modelId}/export`, {});
       const initial: JobStatus = { id: j.id, status: j.status, progress: 0 };
       setJob(initial);
       pollJob(j.id);
@@ -95,82 +88,85 @@ export default function ArtifactsExport() {
     }
   }
 
-  if (artifactLoading) return <Loading label="Loading model info…" />;
+  if (artifactLoading) return <div className="py-6"><Loading label="Loading model info…" /></div>;
 
   return (
-    <div className="max-w-lg mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Export to ONNX</h1>
-        <Link to="/artifacts" className="text-sm text-blue-600 hover:underline">
-          Back to Artifacts
+    <div className="max-w-lg space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] pb-3">
+        <div>
+          <div className="label-overline mb-0.5">// Artifacts / Export</div>
+          <h1>Export to ONNX</h1>
+        </div>
+        <Link to="/artifacts" className="text-xs font-mono text-[var(--hud-accent)] hover:underline">
+          ← ARTIFACTS
         </Link>
       </div>
 
-      {artifactError && (
-        <Alert variant="warning">Could not load model lineage: {artifactError}</Alert>
-      )}
+      {artifactError && <Alert variant="warning">Could not load model lineage: {artifactError}</Alert>}
 
-      {/* Model lineage info */}
+      {/* Model info */}
       {artifact && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Model Info</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <table className="w-full text-sm">
-              <tbody>
-                {artifact.name && (
-                  <tr className="border-b">
-                    <td className="py-1.5 pr-4 text-muted-foreground">Name</td>
-                    <td className="py-1.5 font-medium">{artifact.name}</td>
-                  </tr>
-                )}
-                {artifact.type && (
-                  <tr className="border-b">
-                    <td className="py-1.5 pr-4 text-muted-foreground">Type</td>
-                    <td className="py-1.5">
-                      <Badge>{artifact.type}</Badge>
-                    </td>
-                  </tr>
-                )}
-                {artifact.version != null && (
-                  <tr className="border-b">
-                    <td className="py-1.5 pr-4 text-muted-foreground">Version</td>
-                    <td className="py-1.5">v{artifact.version}</td>
-                  </tr>
-                )}
-                {artifact.run_id && (
-                  <tr className="border-b">
-                    <td className="py-1.5 pr-4 text-muted-foreground">Training Run</td>
-                    <td className="py-1.5">
-                      <Link
-                        to={`/experiments/runs/${artifact.run_id}`}
-                        className="text-blue-600 hover:underline font-mono text-xs"
-                      >
-                        {artifact.run_id.slice(0, 12)}…
-                      </Link>
-                    </td>
-                  </tr>
-                )}
-                {artifact.created_at && (
-                  <tr>
-                    <td className="py-1.5 pr-4 text-muted-foreground">Created</td>
-                    <td className="py-1.5">{new Date(artifact.created_at).toLocaleString()}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+        <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+          <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
+            <div className="h-1.5 w-1.5 bg-[var(--hud-border-strong)]" />
+            <span className="label-overline">Model Info</span>
+          </div>
+          <table className="w-full text-xs font-mono">
+            <tbody>
+              {artifact.name && (
+                <tr className="border-b border-[var(--hud-border-subtle)]">
+                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Name</td>
+                  <td className="px-4 py-1.5 text-[var(--hud-text-primary)]">{artifact.name}</td>
+                </tr>
+              )}
+              {artifact.type && (
+                <tr className="border-b border-[var(--hud-border-subtle)]">
+                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Type</td>
+                  <td className="px-4 py-1.5"><Badge>{artifact.type}</Badge></td>
+                </tr>
+              )}
+              {artifact.version != null && (
+                <tr className="border-b border-[var(--hud-border-subtle)]">
+                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Version</td>
+                  <td className="px-4 py-1.5 text-[var(--hud-text-data)]">v{artifact.version}</td>
+                </tr>
+              )}
+              {artifact.run_id && (
+                <tr className="border-b border-[var(--hud-border-subtle)]">
+                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Training Run</td>
+                  <td className="px-4 py-1.5">
+                    <Link
+                      to={`/experiments/runs/${artifact.run_id}`}
+                      className="text-[var(--hud-accent)] hover:underline underline-offset-1"
+                    >
+                      {artifact.run_id.slice(0, 12)}…
+                    </Link>
+                  </td>
+                </tr>
+              )}
+              {artifact.created_at && (
+                <tr>
+                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Created</td>
+                  <td className="px-4 py-1.5 text-[var(--hud-text-secondary)]">
+                    {new Date(artifact.created_at).toLocaleString()}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* Export controls */}
-      <Card>
-        <CardHeader><CardTitle>ONNX Export</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Export this model to ONNX format for inference with ONNXRuntime, OpenVINO, or other
-            compatible frameworks.
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+        <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
+          <div className="h-1.5 w-1.5 bg-[var(--hud-accent)]" />
+          <span className="label-overline">ONNX Export</span>
+        </div>
+        <div className="p-4 space-y-4">
+          <p className="text-xs text-[var(--hud-text-muted)]">
+            Export this model to ONNX format for inference with ONNXRuntime, OpenVINO, or other compatible frameworks.
           </p>
 
           {error && <Alert variant="error">{error}</Alert>}
@@ -183,19 +179,20 @@ export default function ArtifactsExport() {
 
           {job && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span>Export job</span>
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="text-[var(--hud-text-muted)]">EXPORT JOB</span>
                 <Badge variant={statusVariant(job.status)}>{job.status}</Badge>
               </div>
-              <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+
+              {/* Progress bar */}
+              <div className="h-1 w-full bg-[var(--hud-inset)] overflow-hidden">
                 <div
                   style={{ width: `${job.progress}%` }}
-                  className={`h-full rounded-full transition-all ${
-                    job.status === 'failed' ? 'bg-red-500' : 'bg-blue-600'
-                  }`}
+                  className={`h-full transition-all ${job.status === 'failed' ? 'bg-[var(--hud-danger)]' : 'bg-[var(--hud-accent)]'}`}
                 />
               </div>
-              <p className="text-xs text-muted-foreground font-mono">{job.id}</p>
+
+              <p className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">{job.id}</p>
 
               {job.status === 'failed' && job.error_message && (
                 <Alert variant="error">{job.error_message}</Alert>
@@ -203,36 +200,28 @@ export default function ArtifactsExport() {
 
               {job.status === 'succeeded' && (
                 <div className="space-y-2">
-                  <Alert variant="success">
-                    Export complete! The ONNX model is stored in object storage.
-                  </Alert>
+                  <Alert variant="success">Export complete — ONNX model stored in object storage.</Alert>
                   {job.result_url && (
                     <a
                       href={job.result_url}
-                      className="inline-flex items-center rounded-md bg-blue-600 text-white px-4 h-9 text-sm hover:bg-blue-700"
+                      className="inline-flex items-center h-8 px-3 text-xs font-mono font-medium bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)] border border-[var(--hud-accent)] hover:bg-[var(--hud-accent-hover)] transition-colors"
                       download
                     >
-                      Download ONNX Model
+                      DOWNLOAD ONNX MODEL
                     </a>
                   )}
                 </div>
               )}
 
               {(job.status === 'failed' || job.status === 'succeeded') && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setJob(null);
-                    setExporting(false);
-                  }}
-                >
+                <Button variant="outline" size="sm" onClick={() => { setJob(null); setExporting(false); }}>
                   Export Again
                 </Button>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
