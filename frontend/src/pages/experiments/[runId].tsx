@@ -3,9 +3,10 @@ import { useParams, Link } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
+import Spinner from '@/components/ui/Spinner';
 import Loading from '@/components/common/Loading';
 import ErrorState from '@/components/common/ErrorState';
-import { apiGet, apiPost } from '@/services/api';
+import { apiGet, apiPost, apiDelete } from '@/services/api';
 
 interface Run {
   id: string;
@@ -112,6 +113,205 @@ function MetricsChart({ data, keys }: { data: MetricPoint[]; keys: string[] }) {
   );
 }
 
+function ConfusionMatrix({ labels, matrix }: { labels: string[]; matrix: number[][] }) {
+  const maxVal = Math.max(...matrix.flat().filter(v => v > 0), 1);
+  const n = labels.length;
+  const displayN = Math.min(n, 15);
+  const displayLabels = labels.slice(0, displayN);
+  const displayMatrix = matrix.slice(0, displayN).map(row => row.slice(0, displayN));
+
+  return (
+    <div className="overflow-auto">
+      <div className="text-xs text-muted-foreground mb-2">Predicted →</div>
+      <table className="text-xs border-collapse">
+        <thead>
+          <tr>
+            <th className="w-20 text-right pr-2 text-muted-foreground">Actual ↓</th>
+            {displayLabels.map(l => (
+              <th key={l} className="w-14 text-center pb-1 font-medium text-muted-foreground" style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)', height: '60px' }}>
+                {l.slice(0, 12)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {displayMatrix.map((row, ri) => (
+            <tr key={ri}>
+              <td className="text-right pr-2 py-0.5 font-medium text-muted-foreground truncate max-w-[80px]">
+                {displayLabels[ri]?.slice(0, 12)}
+              </td>
+              {row.map((val, ci) => {
+                const intensity = val / maxVal;
+                const isCorrect = ri === ci;
+                const bg = val === 0 ? 'rgb(249,250,251)' : isCorrect
+                  ? `rgba(34,197,94,${0.2 + intensity * 0.7})`
+                  : `rgba(239,68,68,${0.1 + intensity * 0.6})`;
+                return (
+                  <td
+                    key={ci}
+                    className="w-14 h-10 text-center text-xs border border-white font-mono"
+                    style={{ backgroundColor: bg, color: intensity > 0.6 ? 'white' : 'inherit' }}
+                    title={`Actual: ${displayLabels[ri]} → Predicted: ${displayLabels[ci]}: ${val}`}
+                  >
+                    {val > 0 ? val : ''}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {n > displayN && (
+        <p className="text-xs text-muted-foreground mt-2">Showing {displayN} of {n} classes</p>
+      )}
+    </div>
+  );
+}
+
+function EvaluationPanel({ runId, runStatus }: { runId: string; runStatus: string }) {
+  const [evalData, setEvalData] = useState<any>(null);
+  const [evaluating, setEvaluating] = useState(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+
+  useEffect(() => {
+    apiGet<any>(`/api/experiments/runs/${runId}/evaluation`)
+      .then((data: any) => {
+        if (data?.status !== 'not_evaluated') setEvalData(data);
+      })
+      .catch(() => {});
+  }, [runId]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    const interval = setInterval(async () => {
+      try {
+        const job = await apiGet<any>(`/api/jobs/${jobId}`);
+        if (job.status === 'succeeded') {
+          clearInterval(interval);
+          setJobId(null);
+          setEvaluating(false);
+          const data = await apiGet<any>(`/api/experiments/runs/${runId}/evaluation`);
+          if (data?.status !== 'not_evaluated') setEvalData(data);
+        } else if (job.status === 'failed') {
+          clearInterval(interval);
+          setJobId(null);
+          setEvaluating(false);
+        }
+      } catch {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [jobId, runId]);
+
+  async function runEvaluation() {
+    setEvaluating(true);
+    try {
+      const result = await apiPost<any>(`/api/experiments/runs/${runId}/evaluate`, {});
+      setJobId(result.job_id);
+    } catch {
+      setEvaluating(false);
+    }
+  }
+
+  if (!evalData) {
+    return (
+      <Card>
+        <CardHeader><CardTitle>Model Evaluation</CardTitle></CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Run evaluation to see confusion matrix, per-class AP, and precision-recall metrics.
+          </p>
+          {runStatus === 'succeeded' ? (
+            <Button onClick={runEvaluation} disabled={evaluating}>
+              {evaluating ? (
+                <span className="flex items-center gap-2"><Spinner /> Evaluating…</span>
+              ) : 'Run Evaluation'}
+            </Button>
+          ) : (
+            <p className="text-sm text-muted-foreground">Training must complete before evaluation.</p>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const { summary, per_class, confusion_matrix } = evalData;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            Evaluation Results
+            <Button variant="outline" size="sm" onClick={runEvaluation} disabled={evaluating}>
+              {evaluating ? 'Re-evaluating…' : 'Re-evaluate'}
+            </Button>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {summary && [
+              { label: 'mAP@50', value: summary.mAP50, pct: true, good: 0.7 },
+              { label: 'mAP@50-95', value: summary.mAP50_95, pct: true, good: 0.5 },
+              { label: 'Precision', value: summary.precision, pct: true, good: 0.8 },
+              { label: 'Recall', value: summary.recall, pct: true, good: 0.8 },
+              { label: 'F1', value: summary.f1, pct: true, good: 0.75 },
+              { label: 'Speed (ms)', value: summary.speed_ms, pct: false, good: 0 },
+            ].map(({ label, value, pct, good }) => (
+              <div key={label} className="text-center rounded-lg border p-3">
+                <div className={`text-xl font-bold ${pct && value >= good ? 'text-green-700' : pct && value < good * 0.7 ? 'text-red-700' : 'text-yellow-700'}`}>
+                  {pct ? `${(value * 100).toFixed(1)}%` : value?.toFixed(1)}
+                </div>
+                <div className="text-xs text-muted-foreground">{label}</div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {per_class && per_class.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Per-Class Metrics</CardTitle></CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-muted-foreground text-xs uppercase">
+                    <th className="py-2 text-left font-medium">Class</th>
+                    <th className="py-2 text-right font-medium">AP@50</th>
+                    <th className="py-2 text-right font-medium">AP@50-95</th>
+                    <th className="py-2 text-right font-medium">Precision</th>
+                    <th className="py-2 text-right font-medium">Recall</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {per_class.map((cls: any) => (
+                    <tr key={cls.class_name} className="border-b last:border-0 hover:bg-muted/50">
+                      <td className="py-2 font-medium">{cls.class_name}</td>
+                      <td className="py-2 text-right font-mono">{(cls.ap50 * 100).toFixed(1)}%</td>
+                      <td className="py-2 text-right font-mono">{(cls.ap50_95 * 100).toFixed(1)}%</td>
+                      <td className="py-2 text-right font-mono">{(cls.precision * 100).toFixed(1)}%</td>
+                      <td className="py-2 text-right font-mono">{(cls.recall * 100).toFixed(1)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {confusion_matrix && confusion_matrix.matrix && confusion_matrix.matrix.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Confusion Matrix</CardTitle></CardHeader>
+          <CardContent>
+            <ConfusionMatrix labels={confusion_matrix.labels} matrix={confusion_matrix.matrix} />
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 export default function ExperimentDetail() {
   const { runId } = useParams<{ runId: string }>();
   const [run, setRun] = useState<Run | null>(null);
@@ -120,29 +320,30 @@ export default function ExperimentDetail() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportJobId, setExportJobId] = useState<string | null>(null);
+  const [stopMsg, setStopMsg] = useState<string | null>(null);
   const runStatusRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     runStatusRef.current = run?.status;
   }, [run?.status]);
 
+  const poll = async () => {
+    try {
+      const [runData, metricsData] = await Promise.all([
+        apiGet<Run>(`/api/experiments/runs/${runId}`),
+        apiGet<{ metrics: MetricPoint[] }>(`/api/experiments/runs/${runId}/metrics`),
+      ]);
+      setRun(runData);
+      setMetrics(metricsData.metrics || []);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load run');
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!runId) return;
-
-    const poll = async () => {
-      try {
-        const [runData, metricsData] = await Promise.all([
-          apiGet<Run>(`/api/experiments/runs/${runId}`),
-          apiGet<{ metrics: MetricPoint[] }>(`/api/experiments/runs/${runId}/metrics`),
-        ]);
-        setRun(runData);
-        setMetrics(metricsData.metrics || []);
-        setLoading(false);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load run');
-        setLoading(false);
-      }
-    };
 
     poll();
 
@@ -169,6 +370,19 @@ export default function ExperimentDetail() {
       console.error(err);
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function handleStop() {
+    if (!run) return;
+    if (!window.confirm('Stop this training run?')) return;
+    try {
+      await apiDelete(`/api/jobs/${run.id}`);
+      setStopMsg('Cancellation requested.');
+      poll();
+    } catch (e) {
+      console.error(e);
+      setStopMsg('Stop request sent.');
     }
   }
 
@@ -206,12 +420,29 @@ export default function ExperimentDetail() {
             )}
           </h1>
         </div>
-        {run.status === 'succeeded' && (
-          <Button onClick={handleExport} disabled={exporting || !!exportJobId}>
-            {exporting ? 'Exporting…' : exportJobId ? `Job ${exportJobId.slice(0, 8)}` : 'Export to ONNX'}
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {isActive && (
+            <Button
+              variant="outline"
+              onClick={handleStop}
+              className="border-red-300 text-red-600 hover:bg-red-50"
+            >
+              Stop Training
+            </Button>
+          )}
+          {run.status === 'succeeded' && (
+            <Button onClick={handleExport} disabled={exporting || !!exportJobId}>
+              {exporting ? 'Exporting…' : exportJobId ? `Job ${exportJobId.slice(0, 8)}` : 'Export to ONNX'}
+            </Button>
+          )}
+        </div>
       </div>
+
+      {stopMsg && (
+        <div className="rounded-md border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+          {stopMsg}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
         {/* Metrics chart */}
@@ -286,6 +517,9 @@ export default function ExperimentDetail() {
           <Link to="/artifacts" className="underline">View Artifacts</Link>
         </div>
       )}
+
+      {/* Evaluation Panel */}
+      <EvaluationPanel runId={run.id} runStatus={run.status} />
     </div>
   );
 }

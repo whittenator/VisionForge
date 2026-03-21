@@ -17,6 +17,11 @@ import ExperimentsNew from "./pages/experiments/new";
 import ExperimentDetail from "./pages/experiments/[runId]";
 import ArtifactsIndex from "./pages/artifacts/index";
 import ArtifactsExport from "./pages/artifacts/export";
+import DatasetBrowse from "./pages/datasets/browse";
+import DatasetAnalysis from "./pages/datasets/analysis";
+import ALIndex from "./pages/al/index";
+import ALRunDetail from "./pages/al/[runId]";
+import ExperimentsCompare from "./pages/experiments/compare";
 import { apiGet } from "@/services/api";
 import Spinner from "@/components/ui/Spinner";
 
@@ -121,13 +126,19 @@ export default function App() {
             <Route path="/datasets" element={<ProtectedRoute><DatasetsIndex /></ProtectedRoute>} />
             <Route path="/datasets/upload" element={<ProtectedRoute><DatasetUpload /></ProtectedRoute>} />
             <Route path="/datasets/version" element={<ProtectedRoute><DatasetVersion /></ProtectedRoute>} />
+            <Route path="/datasets/:datasetId/assets" element={<ProtectedRoute><DatasetBrowse /></ProtectedRoute>} />
+            <Route path="/datasets/:datasetId/analysis" element={<ProtectedRoute><DatasetAnalysis /></ProtectedRoute>} />
             {/* Experiments */}
             <Route path="/experiments" element={<ProtectedRoute><ExperimentsIndex /></ProtectedRoute>} />
             <Route path="/experiments/new" element={<ProtectedRoute><ExperimentsNew /></ProtectedRoute>} />
+            <Route path="/experiments/compare" element={<ProtectedRoute><ExperimentsCompare /></ProtectedRoute>} />
             <Route path="/experiments/runs/:runId" element={<ProtectedRoute><ExperimentDetail /></ProtectedRoute>} />
             {/* Artifacts */}
             <Route path="/artifacts" element={<ProtectedRoute><ArtifactsIndex /></ProtectedRoute>} />
             <Route path="/artifacts/export/:modelId" element={<ProtectedRoute><ArtifactsExport /></ProtectedRoute>} />
+            {/* Active Learning */}
+            <Route path="/al" element={<ProtectedRoute><ALIndex /></ProtectedRoute>} />
+            <Route path="/al/:runId" element={<ProtectedRoute><ALRunDetail /></ProtectedRoute>} />
             {/* Annotate */}
             <Route path="/annotate/:assetId" element={<ProtectedRoute><AnnotatorPage /></ProtectedRoute>} />
             {/* Admin */}

@@ -7,7 +7,7 @@ import Badge from '@/components/ui/Badge';
 import Alert from '@/components/ui/Alert';
 import Loading from '@/components/common/Loading';
 import EmptyState from '@/components/common/EmptyState';
-import { apiGet } from '@/services/api';
+import { apiGet, apiPost } from '@/services/api';
 
 interface Workspace {
   id: string;
@@ -46,6 +46,7 @@ export default function AdminUsers() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('annotator');
   const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     apiGet<Workspace[]>('/api/workspaces')
@@ -68,13 +69,25 @@ export default function AdminUsers() {
       .finally(() => setMembersLoading(false));
   }, [selectedWorkspace]);
 
-  function handleInviteSubmit(e: React.FormEvent) {
+  async function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!inviteEmail) return;
-    // No actual invite endpoint yet — show a placeholder message
-    setInviteMsg(`Invitation for ${inviteEmail} (${inviteRole}) would be sent. Invite endpoint not yet implemented.`);
-    setInviteEmail('');
-    setInviteRole('annotator');
+    if (!selectedWorkspace || !inviteEmail) return;
+    setInviting(true);
+    setInviteMsg(null);
+    try {
+      await apiPost(`/api/workspaces/${selectedWorkspace}/invite`, {
+        email: inviteEmail,
+        role: inviteRole,
+      });
+      setInviteMsg(`Successfully invited ${inviteEmail} as ${inviteRole}`);
+      setInviteEmail('');
+      const data = await apiGet<Member[]>(`/api/workspaces/${selectedWorkspace}/members`);
+      setMembers(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setInviteMsg(err instanceof Error ? err.message : 'Failed to invite user');
+    } finally {
+      setInviting(false);
+    }
   }
 
   const currentWorkspace = workspaces.find((w) => w.id === selectedWorkspace);
@@ -202,8 +215,8 @@ export default function AdminUsers() {
                     ))}
                   </Select>
                 </div>
-                <Button aria-label="Create user" type="submit">
-                  Send Invite
+                <Button aria-label="Create user" type="submit" disabled={inviting}>
+                  {inviting ? 'Sending…' : 'Send Invite'}
                 </Button>
               </form>
               {inviteMsg && (

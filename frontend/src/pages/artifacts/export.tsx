@@ -44,6 +44,7 @@ export default function ArtifactsExport() {
   const [job, setJob] = useState<JobStatus | null>(null);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -70,6 +71,11 @@ export default function ArtifactsExport() {
         if (updated.status === 'succeeded' || updated.status === 'failed') {
           if (intervalRef.current) clearInterval(intervalRef.current);
           setExporting(false);
+          if (updated.status === 'succeeded' && modelId) {
+            apiGet<{ url: string; filename: string }>(`/api/artifacts/models/${modelId}/download`)
+              .then(data => setDownloadUrl(data.url))
+              .catch(() => {});
+          }
         }
       } catch (err) {
         console.error('Failed to poll job', err);
@@ -206,13 +212,13 @@ export default function ArtifactsExport() {
                   <Alert variant="success">
                     Export complete! The ONNX model is stored in object storage.
                   </Alert>
-                  {job.result_url && (
+                  {(downloadUrl || job.result_url) && (
                     <a
-                      href={job.result_url}
-                      className="inline-flex items-center rounded-md bg-blue-600 text-white px-4 h-9 text-sm hover:bg-blue-700"
+                      href={downloadUrl || job.result_url || ''}
+                      className="inline-flex items-center gap-2 rounded-md bg-green-600 text-white px-4 h-9 text-sm hover:bg-green-700 transition-colors"
                       download
                     >
-                      Download ONNX Model
+                      ⬇ Download .onnx
                     </a>
                   )}
                 </div>
