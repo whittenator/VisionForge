@@ -84,9 +84,12 @@ export default function DatasetsIndex() {
             <div key={ds.id} className="bg-[var(--hud-surface)] p-4 flex flex-col gap-2 hover:bg-[var(--hud-elevated)] transition-colors">
               {/* Title row */}
               <div className="flex items-start justify-between gap-2">
-                <div className="font-semibold text-sm text-[var(--hud-text-primary)] leading-tight">
+                <Link
+                  to={`/datasets/${ds.id}`}
+                  className="font-semibold text-sm text-[var(--hud-text-primary)] leading-tight hover:text-[var(--hud-accent)] transition-colors"
+                >
                   {ds.name}
-                </div>
+                </Link>
                 {ds.latest_version != null && (
                   <Badge variant="default">v{ds.latest_version}</Badge>
                 )}
@@ -128,7 +131,7 @@ export default function DatasetsIndex() {
                 </Link>
                 {ds.asset_count > 0 && (
                   <Link
-                    to={`/annotate/${ds.id}`}
+                    to={`/datasets/${ds.id}/annotate`}
                     className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)] border border-[var(--hud-border-default)] px-2 py-0.5 hover:border-[var(--hud-accent)] transition-colors"
                   >
                     ANNOTATE

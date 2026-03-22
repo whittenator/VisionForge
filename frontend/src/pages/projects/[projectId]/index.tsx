@@ -174,7 +174,7 @@ export default function ProjectDashboard() {
                     </Link>
                     {ds.asset_count > 0 && (
                       <Link
-                        to={`/annotate/${ds.id}`}
+                        to={`/datasets/${ds.id}/annotate`}
                         className="text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)] transition-colors"
                       >
                         ANNOTATE

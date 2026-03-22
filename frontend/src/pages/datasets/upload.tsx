@@ -1,9 +1,11 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
 import Alert from '@/components/ui/Alert';
 import Spinner from '@/components/ui/Spinner';
-import { apiPost } from '@/services/api';
+import Select from '@/components/ui/Select';
+import { apiGet, apiPost } from '@/services/api';
 
 interface UploadEntry {
   name: string;
@@ -12,11 +14,19 @@ interface UploadEntry {
   error?: string;
 }
 
+interface Project { id: string; name: string; }
+
 export default function DatasetUpload() {
-  const [searchParams] = useSearchParams();
-  const projectId  = searchParams.get('projectId') || '';
-  const datasetId  = searchParams.get('datasetId') || '';
-  const versionId  = searchParams.get('versionId') || '';
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [projectId, setProjectId]   = useState(searchParams.get('projectId') || '');
+  const [datasetId, setDatasetId]   = useState(searchParams.get('datasetId') || '');
+  const [versionId, setVersionId]   = useState(searchParams.get('versionId') || '');
+
+  // Dataset creation state (only shown when no datasetId/versionId provided)
+  const [projects, setProjects]           = useState<Project[]>([]);
+  const [newDatasetName, setNewDatasetName] = useState('');
+  const [creating, setCreating]            = useState(false);
+  const [createError, setCreateError]      = useState<string | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
   const [uploads, setUploads] = useState<UploadEntry[]>([]);
@@ -24,6 +34,39 @@ export default function DatasetUpload() {
   const [error, setError] = useState<string | null>(null);
   const [allDone, setAllDone] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load projects for the creation form
+  useEffect(() => {
+    if (!datasetId) {
+      apiGet<Project[]>('/api/projects').then(setProjects).catch(console.error);
+    }
+  }, [datasetId]);
+
+  async function createDatasetAndVersion() {
+    if (!newDatasetName.trim()) { setCreateError('Enter a dataset name'); return; }
+    const effectiveProject = projectId;
+    if (!effectiveProject) { setCreateError('Select a project'); return; }
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const ds = await apiPost<{ id: string; activeVersionId: string }>(
+        `/api/datasets/${effectiveProject}`,
+        { name: newDatasetName.trim() }
+      );
+      setDatasetId(ds.id);
+      setVersionId(ds.activeVersionId);
+      // Update URL params so the user can share/reload
+      setSearchParams({
+        ...(effectiveProject ? { projectId: effectiveProject } : {}),
+        datasetId: ds.id,
+        versionId: ds.activeVersionId,
+      });
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create dataset');
+    } finally {
+      setCreating(false);
+    }
+  }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(e.target.files || []);
@@ -49,7 +92,7 @@ export default function DatasetUpload() {
   async function onUpload() {
     if (!files.length) return;
     if (!datasetId || !versionId) {
-      setError('Missing datasetId or versionId. Use ?datasetId=...&versionId=... query params.');
+      setError('Create a dataset first before uploading.');
       return;
     }
     setUploading(true);
@@ -129,12 +172,47 @@ export default function DatasetUpload() {
         )}
       </div>
 
-      {/* Context info */}
-      {!datasetId || !versionId ? (
-        <Alert variant="warning">
-          No dataset/version selected. Pass <code className="font-mono">?datasetId=...&amp;versionId=...</code> in the URL.
-        </Alert>
-      ) : (
+      {/* Dataset creation form — shown when no datasetId/versionId in URL */}
+      {(!datasetId || !versionId) && (
+        <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+          <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
+            <div className="h-1.5 w-1.5 bg-[var(--hud-accent)]" />
+            <span className="label-overline">Create New Dataset</span>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label-overline block mb-1" htmlFor="proj-select">Project</label>
+                <Select
+                  id="proj-select"
+                  value={projectId}
+                  onChange={(e) => setProjectId(e.target.value)}
+                >
+                  <option value="">— select —</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              </div>
+              <div>
+                <label className="label-overline block mb-1" htmlFor="ds-name">Dataset Name</label>
+                <Input
+                  id="ds-name"
+                  placeholder="e.g. Detection v1"
+                  value={newDatasetName}
+                  onChange={(e) => setNewDatasetName(e.target.value)}
+                  onKeyDown={(e: React.KeyboardEvent) => e.key === 'Enter' && createDatasetAndVersion()}
+                />
+              </div>
+            </div>
+            {createError && <Alert variant="error">{createError}</Alert>}
+            <Button onClick={createDatasetAndVersion} disabled={creating || !newDatasetName.trim() || !projectId}>
+              {creating ? <span className="flex items-center gap-2"><Spinner size={12} />Creating…</span> : 'Create Dataset & Continue'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Context info — shown once dataset/version is known */}
+      {datasetId && versionId && (
         <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] px-4 py-2 flex items-center gap-4 text-xs font-mono">
           <span>
             <span className="text-[var(--hud-text-muted)]">DATASET </span>
@@ -144,6 +222,12 @@ export default function DatasetUpload() {
             <span className="text-[var(--hud-text-muted)]">VERSION </span>
             <span className="text-[var(--hud-text-data)]">{versionId.slice(0, 12)}…</span>
           </span>
+          <Link
+            to={`/datasets/${datasetId}`}
+            className="ml-auto text-[var(--hud-accent)] hover:underline underline-offset-2"
+          >
+            VIEW DATASET →
+          </Link>
         </div>
       )}
 

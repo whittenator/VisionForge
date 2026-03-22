@@ -3,11 +3,12 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/services/auth-store';
 
 const NAV_LINKS = [
-  { to: '/projects',    label: 'PROJECTS'    },
-  { to: '/datasets',   label: 'DATASETS'    },
-  { to: '/experiments', label: 'EXPERIMENTS' },
-  { to: '/artifacts',  label: 'ARTIFACTS'   },
-  { to: '/admin/users', label: 'ADMIN'       },
+  { to: '/projects',         label: 'PROJECTS'    },
+  { to: '/datasets',         label: 'DATASETS'    },
+  { to: '/experiments',      label: 'EXPERIMENTS' },
+  { to: '/artifacts',        label: 'ARTIFACTS'   },
+  { to: '/active-learning',  label: 'ACTIVE LEARN'},
+  { to: '/admin/users',      label: 'ADMIN'       },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {

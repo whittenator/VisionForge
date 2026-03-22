@@ -300,15 +300,36 @@ def train_task(payload: dict) -> dict:
 
                 model.add_callback("on_train_epoch_end", on_train_epoch_end)
 
-                model.train(
-                    data=str(data_yaml),
-                    epochs=total_epochs,
-                    imgsz=params.get("imgsz", 640),
-                    batch=params.get("batch", 16),
-                    device=params.get("device", "cpu"),
-                    project=str(output_dir),
-                    name="train",
-                )
+                train_kwargs: dict = {
+                    "data": str(data_yaml),
+                    "epochs": total_epochs,
+                    "imgsz": params.get("imgsz", 640),
+                    "batch": params.get("batch", 16),
+                    "device": params.get("device", "cpu"),
+                    "project": str(output_dir),
+                    "name": "train",
+                    # Learning rate hyperparameters
+                    "lr0": params.get("lr0", 0.01),
+                    "lrf": params.get("lrf", 0.01),
+                    "momentum": params.get("momentum", 0.937),
+                    "weight_decay": params.get("weight_decay", 0.0005),
+                    "warmup_epochs": params.get("warmup_epochs", 3.0),
+                    # Augmentation parameters
+                    "hsv_h": params.get("hsv_h", 0.015),
+                    "hsv_s": params.get("hsv_s", 0.7),
+                    "hsv_v": params.get("hsv_v", 0.4),
+                    "degrees": params.get("degrees", 0.0),
+                    "translate": params.get("translate", 0.1),
+                    "scale": params.get("scale", 0.5),
+                    "shear": params.get("shear", 0.0),
+                    "perspective": params.get("perspective", 0.0),
+                    "flipud": params.get("flipud", 0.0),
+                    "fliplr": params.get("fliplr", 0.5),
+                    "mosaic": params.get("mosaic", 1.0),
+                    "mixup": params.get("mixup", 0.0),
+                    "copy_paste": params.get("copy_paste", 0.0),
+                }
+                model.train(**train_kwargs)
 
                 # Locate best.pt
                 candidate = output_dir / "train" / "weights" / "best.pt"
