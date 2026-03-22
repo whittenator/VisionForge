@@ -12,6 +12,20 @@ interface Dataset { id: string; name: string; latest_version_id?: string; }
 
 const BASE_MODELS = ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'];
 
+const DEFAULT_AUGMENTATIONS = {
+  hsv_h: 0.015,
+  hsv_s: 0.7,
+  hsv_v: 0.4,
+  degrees: 0.0,
+  translate: 0.1,
+  scale: 0.5,
+  shear: 0.0,
+  flipud: 0.0,
+  fliplr: 0.5,
+  mosaic: 1.0,
+  mixup: 0.0,
+};
+
 function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
   return (
     <label htmlFor={htmlFor} className="label-overline block mb-1">
@@ -35,9 +49,15 @@ export default function ExperimentsNew() {
     epochs: 50,
     batchSize: 16,
     imageSize: 640,
-    learningRate: 0.001,
+    learningRate: 0.01,
+    lrf: 0.01,
+    momentum: 0.937,
+    weightDecay: 0.0005,
+    warmupEpochs: 3.0,
     device: 'cpu',
+    augmentations: { ...DEFAULT_AUGMENTATIONS },
   });
+  const [showAugmentations, setShowAugmentations] = useState(false);
   const [loading, setLoading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +89,18 @@ export default function ExperimentsNew() {
         task: form.task,
         baseModel: form.baseModel,
         name: form.name,
-        params: { epochs: form.epochs, batch: form.batchSize, imgsz: form.imageSize, lr0: form.learningRate, device: form.device },
+        params: {
+          epochs: form.epochs,
+          batch: form.batchSize,
+          imgsz: form.imageSize,
+          lr0: form.learningRate,
+          lrf: form.lrf,
+          momentum: form.momentum,
+          weight_decay: form.weightDecay,
+          warmup_epochs: form.warmupEpochs,
+          device: form.device,
+          ...form.augmentations,
+        },
       });
       setJobId(job.id);
       setTimeout(() => navigate('/experiments'), 1500);
@@ -184,8 +215,24 @@ export default function ExperimentsNew() {
               <Input id="image-size" type="number" min={32} max={1280} step={32} value={form.imageSize} onChange={(e) => setField('imageSize', parseInt(e.target.value) || 640)} />
             </div>
             <div>
-              <FieldLabel htmlFor="lr">Learning Rate</FieldLabel>
-              <Input id="lr" type="number" min={0.00001} max={1} step={0.0001} value={form.learningRate} onChange={(e) => setField('learningRate', parseFloat(e.target.value) || 0.001)} />
+              <FieldLabel htmlFor="lr">Initial LR (lr0)</FieldLabel>
+              <Input id="lr" type="number" min={0.00001} max={1} step={0.0001} value={form.learningRate} onChange={(e) => setField('learningRate', parseFloat(e.target.value) || 0.01)} />
+            </div>
+            <div>
+              <FieldLabel htmlFor="lrf">Final LR (lrf)</FieldLabel>
+              <Input id="lrf" type="number" min={0.00001} max={1} step={0.0001} value={form.lrf} onChange={(e) => setField('lrf', parseFloat(e.target.value) || 0.01)} />
+            </div>
+            <div>
+              <FieldLabel htmlFor="momentum">Momentum</FieldLabel>
+              <Input id="momentum" type="number" min={0} max={1} step={0.001} value={form.momentum} onChange={(e) => setField('momentum', parseFloat(e.target.value) || 0.937)} />
+            </div>
+            <div>
+              <FieldLabel htmlFor="weight-decay">Weight Decay</FieldLabel>
+              <Input id="weight-decay" type="number" min={0} max={0.1} step={0.0001} value={form.weightDecay} onChange={(e) => setField('weightDecay', parseFloat(e.target.value) || 0.0005)} />
+            </div>
+            <div>
+              <FieldLabel htmlFor="warmup-epochs">Warmup Epochs</FieldLabel>
+              <Input id="warmup-epochs" type="number" min={0} max={10} step={0.5} value={form.warmupEpochs} onChange={(e) => setField('warmupEpochs', parseFloat(e.target.value) || 3)} />
             </div>
             <div className="col-span-2">
               <FieldLabel htmlFor="device">Device</FieldLabel>
@@ -198,6 +245,51 @@ export default function ExperimentsNew() {
               </Select>
             </div>
           </div>
+        </div>
+
+        {/* Augmentation */}
+        <div className="border border-t-0 border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+          <button
+            type="button"
+            onClick={() => setShowAugmentations((v) => !v)}
+            className="w-full border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center justify-between hover:bg-[var(--hud-elevated)] transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <div className="h-1.5 w-1.5 bg-[var(--hud-border-strong)]" />
+              <span className="label-overline">Augmentation Parameters</span>
+            </div>
+            <span className="text-xs font-mono text-[var(--hud-text-muted)]">
+              {showAugmentations ? '▲ COLLAPSE' : '▼ EXPAND'}
+            </span>
+          </button>
+          {showAugmentations && (
+            <div className="p-4 grid grid-cols-2 gap-3">
+              {(Object.keys(DEFAULT_AUGMENTATIONS) as Array<keyof typeof DEFAULT_AUGMENTATIONS>).map((key) => (
+                <div key={key}>
+                  <FieldLabel htmlFor={`aug-${key}`}>{key}</FieldLabel>
+                  <Input
+                    id={`aug-${key}`}
+                    type="number"
+                    min={0}
+                    max={key === 'mosaic' ? 1 : undefined}
+                    step={0.001}
+                    value={form.augmentations[key]}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        augmentations: { ...prev.augmentations, [key]: parseFloat(e.target.value) || 0 },
+                      }))
+                    }
+                  />
+                </div>
+              ))}
+              <div className="col-span-2 text-[0.6875rem] font-mono text-[var(--hud-text-muted)] border border-[var(--hud-border-subtle)] bg-[var(--hud-inset)] px-3 py-2">
+                Augmentation values follow Ultralytics YOLO conventions. hsv_h/s/v: colour jitter fractions.
+                degrees: rotation range. fliplr/flipud: flip probability. mosaic: mosaic augmentation probability.
+                mixup: MixUp probability.
+              </div>
+            </div>
+          )}
         </div>
 
         {error && <Alert variant="error" className="mt-3">{error}</Alert>}

@@ -115,7 +115,7 @@ export default function DatasetVersion() {
                 <span className="text-[var(--hud-text-data)]">{result.id}</span>
               </div>
               <Link
-                to={`/datasets?datasetId=${datasetId}`}
+                to={`/datasets/${datasetId}`}
                 className="text-[var(--hud-accent)] hover:underline underline-offset-2"
               >
                 View all versions →

@@ -12,11 +12,16 @@ import ProjectDashboard from "./pages/projects/[projectId]/index";
 import DatasetUpload from "./pages/datasets/upload";
 import DatasetVersion from "./pages/datasets/version";
 import DatasetsIndex from "./pages/datasets/index";
+import DatasetDetail from "./pages/datasets/[datasetId]/index";
+import DatasetAnnotateGateway from "./pages/datasets/[datasetId]/annotate";
 import ExperimentsIndex from "./pages/experiments/index";
 import ExperimentsNew from "./pages/experiments/new";
 import ExperimentDetail from "./pages/experiments/[runId]";
 import ArtifactsIndex from "./pages/artifacts/index";
 import ArtifactsExport from "./pages/artifacts/export";
+import ActiveLearningIndex from "./pages/active-learning/index";
+import ActiveLearningNew from "./pages/active-learning/new";
+import ALRunDetail from "./pages/active-learning/[alRunId]";
 import { apiGet } from "@/services/api";
 import Spinner from "@/components/ui/Spinner";
 
@@ -125,12 +130,13 @@ function HomeDashboard() {
       {/* Quick nav grid */}
       <div>
         <div className="label-overline mb-2">Quick Access</div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-[var(--hud-border-default)]">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-[var(--hud-border-default)]">
           {[
-            { to: '/projects',    label: 'PROJECTS',    desc: 'Manage project workspaces'      },
-            { to: '/datasets',   label: 'DATASETS',    desc: 'Browse and upload datasets'     },
-            { to: '/experiments', label: 'EXPERIMENTS', desc: 'Training runs and metrics'      },
-            { to: '/artifacts',  label: 'ARTIFACTS',   desc: 'Model exports and lineage'      },
+            { to: '/projects',        label: 'PROJECTS',       desc: 'Manage project workspaces'            },
+            { to: '/datasets',        label: 'DATASETS',       desc: 'Browse and upload datasets'           },
+            { to: '/experiments',     label: 'EXPERIMENTS',    desc: 'Training runs and metrics'            },
+            { to: '/artifacts',       label: 'ARTIFACTS',      desc: 'Model exports and lineage'            },
+            { to: '/active-learning', label: 'ACTIVE LEARN',   desc: 'Select informative samples to label'  },
           ].map(({ to, label, desc }) => (
             <Link
               key={to}
@@ -172,6 +178,8 @@ export default function App() {
             <Route path="/datasets" element={<ProtectedRoute><DatasetsIndex /></ProtectedRoute>} />
             <Route path="/datasets/upload" element={<ProtectedRoute><DatasetUpload /></ProtectedRoute>} />
             <Route path="/datasets/version" element={<ProtectedRoute><DatasetVersion /></ProtectedRoute>} />
+            <Route path="/datasets/:datasetId" element={<ProtectedRoute><DatasetDetail /></ProtectedRoute>} />
+            <Route path="/datasets/:datasetId/annotate" element={<ProtectedRoute><DatasetAnnotateGateway /></ProtectedRoute>} />
             {/* Experiments */}
             <Route path="/experiments" element={<ProtectedRoute><ExperimentsIndex /></ProtectedRoute>} />
             <Route path="/experiments/new" element={<ProtectedRoute><ExperimentsNew /></ProtectedRoute>} />
@@ -179,6 +187,10 @@ export default function App() {
             {/* Artifacts */}
             <Route path="/artifacts" element={<ProtectedRoute><ArtifactsIndex /></ProtectedRoute>} />
             <Route path="/artifacts/export/:modelId" element={<ProtectedRoute><ArtifactsExport /></ProtectedRoute>} />
+            {/* Active Learning */}
+            <Route path="/active-learning" element={<ProtectedRoute><ActiveLearningIndex /></ProtectedRoute>} />
+            <Route path="/active-learning/new" element={<ProtectedRoute><ActiveLearningNew /></ProtectedRoute>} />
+            <Route path="/active-learning/:alRunId" element={<ProtectedRoute><ALRunDetail /></ProtectedRoute>} />
             {/* Annotate */}
             <Route path="/annotate/:assetId" element={<ProtectedRoute><AnnotatorPage /></ProtectedRoute>} />
             {/* Admin */}

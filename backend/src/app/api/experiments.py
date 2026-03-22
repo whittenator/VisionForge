@@ -85,11 +85,17 @@ def get_metrics(
     if e.metrics_json:
         try:
             data = json.loads(e.metrics_json)
-            # metrics_json can be a list of epoch dicts or a single summary dict
+            # metrics_json may be:
+            #   - a list of epoch dicts: [{epoch, mAP50, ...}, ...]
+            #   - {"epochs": [{epoch, mAP50, ...}, ...]} as written by train_task
+            #   - {"error": "..."} on failure
             if isinstance(data, list):
                 metrics = data
             elif isinstance(data, dict):
-                metrics = [data]
+                if "epochs" in data and isinstance(data["epochs"], list):
+                    metrics = data["epochs"]
+                elif "error" not in data:
+                    metrics = [data]
         except Exception:
             pass
     return {"run_id": runId, "status": e.status, "metrics": metrics}

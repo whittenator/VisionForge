@@ -43,7 +43,14 @@ def train(
     current_user: User = Depends(get_current_user),
 ):
     job = launch_training(
-        db, payload.projectId, payload.datasetVersionId, payload.task, payload.params
+        db,
+        payload.projectId,
+        payload.datasetVersionId,
+        payload.task,
+        payload.params,
+        name=payload.name,
+        base_model=payload.baseModel,
+        owner_id=current_user.id,
     )
     return Job(**job)
 
