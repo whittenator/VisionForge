@@ -22,6 +22,8 @@ import ArtifactsExport from "./pages/artifacts/export";
 import ActiveLearningIndex from "./pages/active-learning/index";
 import ActiveLearningNew from "./pages/active-learning/new";
 import ALRunDetail from "./pages/active-learning/[alRunId]";
+import ClustersIndex from "./pages/clusters/index";
+import ClustersNew from "./pages/clusters/new";
 import { apiGet } from "@/services/api";
 import Spinner from "@/components/ui/Spinner";
 
@@ -191,6 +193,9 @@ export default function App() {
             <Route path="/active-learning" element={<ProtectedRoute><ActiveLearningIndex /></ProtectedRoute>} />
             <Route path="/active-learning/new" element={<ProtectedRoute><ActiveLearningNew /></ProtectedRoute>} />
             <Route path="/active-learning/:alRunId" element={<ProtectedRoute><ALRunDetail /></ProtectedRoute>} />
+            {/* Clusters */}
+            <Route path="/clusters" element={<ProtectedRoute><ClustersIndex /></ProtectedRoute>} />
+            <Route path="/clusters/new" element={<ProtectedRoute><ClustersNew /></ProtectedRoute>} />
             {/* Annotate */}
             <Route path="/annotate/:assetId" element={<ProtectedRoute><AnnotatorPage /></ProtectedRoute>} />
             {/* Admin */}

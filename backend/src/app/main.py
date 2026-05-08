@@ -5,6 +5,8 @@ import json
 import os
 import time
 
+from alembic import command as alembic_command
+from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -14,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.api.al import router as al_router
 from app.api.artifacts import router as artifacts_router
 from app.api.auth import router as auth_router
+from app.api.clusters import router as clusters_router
 from app.api.datasets import router as datasets_router
 from app.api.experiments import router as experiments_router
 from app.api.jobs import router as jobs_router
@@ -25,8 +28,6 @@ from app.models.job import Job as JobModel
 from app.observability.logging import configure_logging
 from app.observability.metrics import metrics_middleware
 from app.services.auth import ensure_superuser
-from alembic import command as alembic_command
-from alembic.config import Config as AlembicConfig
 
 # Import new routers (created by the new API implementation)
 try:
@@ -120,6 +121,7 @@ app.include_router(al_router)
 app.include_router(jobs_router)
 app.include_router(experiments_router)
 app.include_router(artifacts_router)
+app.include_router(clusters_router)
 
 # New feature routers (conditionally registered based on availability)
 if _has_annotations:
