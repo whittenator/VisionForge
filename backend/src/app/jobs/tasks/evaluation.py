@@ -275,6 +275,21 @@ def _download_to(uri: str, dest: Path) -> bool:
         return False
 
 
+def _asset_split(asset) -> str | None:
+    """Read the asset's split tag (test/val/train) from its meta_data JSON."""
+    md = getattr(asset, "meta_data", None)
+    if not md:
+        return None
+    try:
+        parsed = json.loads(md)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    val = parsed.get("split") or parsed.get("subset")
+    return str(val).lower() if val else None
+
+
 def _load_classes_for_dataset(db, version) -> list[str]:
     from app.models.dataset import ClassMap, Dataset
 
@@ -302,6 +317,7 @@ def evaluate_task(payload: dict) -> dict:
     iou_threshold = float(payload.get("iouThreshold", 0.5))
     sample_budget = int(payload.get("sampleFpFnCount", 50))
     max_samples = int(payload.get("maxSamples", 0)) or None
+    split = (payload.get("split") or "all").lower()
 
     db = _make_session()
     try:
@@ -336,6 +352,14 @@ def evaluate_task(payload: dict) -> dict:
                 )
             ).all()
         )
+        # Apply split filter. We look in `meta_data.split` (set by the importers /
+        # annotation tools). When "all", every labeled asset is in scope; when a
+        # specific split is requested but no asset carries that tag, we fall back
+        # to "all" rather than silently scoring zero samples.
+        if split and split != "all":
+            tagged = [a for a in assets if _asset_split(a) == split]
+            if tagged:
+                assets = tagged
         if max_samples:
             assets = assets[:max_samples]
         if not assets:
@@ -361,8 +385,11 @@ def evaluate_task(payload: dict) -> dict:
         )
         is_detection = any(a.type == "box" for a in first_asset_anns)
 
-        # Load model
-        model = _load_model(artifact)
+        # Single per-task scratch dir — cleans up the downloaded weights when we
+        # exit the `with` block, regardless of success/failure.
+        scratch_ctx = tempfile.TemporaryDirectory()
+        scratch_dir = Path(scratch_ctx.name)
+        model = _load_model(artifact, scratch_dir)
 
         if is_detection:
             items: list[dict[str, Any]] = []
@@ -516,17 +543,20 @@ def evaluate_task(payload: dict) -> dict:
             pass
         return {"status": "failed", "error": msg}
     finally:
+        try:
+            scratch_ctx.cleanup()
+        except (UnboundLocalError, NameError, FileNotFoundError):
+            pass
         db.close()
 
 
-def _load_model(artifact) -> Any:
-    """Lazy model loader. Tries Ultralytics YOLO first, then ONNXRuntime."""
+def _load_model(artifact, scratch_dir: Path) -> Any:
+    """Lazy model loader. Downloads weights into `scratch_dir` (caller-managed)."""
     storage_path = artifact.storage_path
     if not storage_path:
         raise RuntimeError("artifact has no storage_path")
-    local = Path(tempfile.mkdtemp()) / Path(storage_path).name
-    ok = _download_to(storage_path, local)
-    if not ok:
+    local = scratch_dir / Path(storage_path).name
+    if not _download_to(storage_path, local):
         raise RuntimeError(f"could not fetch artifact from {storage_path}")
     fmt = (artifact.format or artifact.type or "").lower()
     if fmt == "onnx" or str(local).endswith(".onnx"):
@@ -541,10 +571,12 @@ def _load_model(artifact) -> Any:
 
 def _predict_detections(model, asset, score_threshold: float) -> list[dict[str, Any]]:
     kind, m = model
-    img_path = Path(tempfile.mkdtemp()) / "img"
-    if not _download_to(asset.uri, img_path):
-        return []
-    if kind == "yolo":
+    with tempfile.TemporaryDirectory() as tmp:
+        img_path = Path(tmp) / "img"
+        if not _download_to(asset.uri, img_path):
+            return []
+        if kind != "yolo":
+            return []
         results = m.predict(str(img_path), conf=score_threshold, verbose=False)
         out: list[dict[str, Any]] = []
         for r in results:
@@ -561,15 +593,16 @@ def _predict_detections(model, asset, score_threshold: float) -> list[dict[str, 
                     }
                 )
         return out
-    return []
 
 
 def _predict_classification(model, asset, classes: list[str]) -> tuple[str, float]:
     kind, m = model
-    img_path = Path(tempfile.mkdtemp()) / "img"
-    if not _download_to(asset.uri, img_path):
-        return ("unknown", 0.0)
-    if kind == "yolo":
+    with tempfile.TemporaryDirectory() as tmp:
+        img_path = Path(tmp) / "img"
+        if not _download_to(asset.uri, img_path):
+            return ("unknown", 0.0)
+        if kind != "yolo":
+            return ("unknown", 0.0)
         results = m.predict(str(img_path), verbose=False)
         for r in results:
             probs = getattr(r, "probs", None)

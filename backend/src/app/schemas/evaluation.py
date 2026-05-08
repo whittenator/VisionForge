@@ -67,3 +67,19 @@ class EvaluationSummary(BaseModel):
     primary_metric_name: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+class EvaluationJobResponse(BaseModel):
+    """Response for POST /api/evaluations.
+
+    Carries both the job linkage (for status polling) and the evaluation id
+    (so the UI can navigate to the evaluation detail page).
+    """
+
+    id: str  # alias of jobId, for backwards compat with the generic Job schema
+    jobId: str
+    type: str = "evaluation"
+    status: str
+    progress: float = 0.0
+    evaluationId: str
+    clusterId: str | None = None

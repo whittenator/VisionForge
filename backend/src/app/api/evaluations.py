@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
 from app.models.user import User
-from app.schemas.common import Job
 from app.schemas.evaluation import (
     EvaluationCreate,
+    EvaluationJobResponse,
     EvaluationOut,
     EvaluationSummary,
 )
@@ -33,7 +33,7 @@ def list_evaluations(
     return [EvaluationSummary(**evaluation_service.summarize(r)) for r in rows]
 
 
-@router.post("", response_model=Job, status_code=202)
+@router.post("", response_model=EvaluationJobResponse, status_code=202)
 def create_evaluation(
     payload: EvaluationCreate,
     db: Session = Depends(get_db),
@@ -45,7 +45,7 @@ def create_evaluation(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except cluster_service.ClusterNotAvailableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return Job(**job)
+    return EvaluationJobResponse(**job)
 
 
 @router.get("/{evaluation_id}", response_model=EvaluationOut)

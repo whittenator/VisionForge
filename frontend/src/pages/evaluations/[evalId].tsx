@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import Badge from '@/components/ui/Badge';
 import Spinner from '@/components/ui/Spinner';
@@ -53,6 +53,13 @@ export default function EvaluationDetail() {
   const { evalId } = useParams();
   const [data, setData] = useState<Evaluation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Mirror the live status into a ref so the polling closure can see the
+  // latest value without re-creating the interval each render.
+  const statusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    statusRef.current = data?.status ?? null;
+  }, [data?.status]);
 
   useEffect(() => {
     if (!evalId) return;
@@ -63,20 +70,22 @@ export default function EvaluationDetail() {
           if (!cancelled) setData(d);
         })
         .catch((err) => {
-          if (!cancelled)
-            setError(err instanceof Error ? err.message : 'Failed to load');
+          if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load');
         });
     }
     load();
     const t = setInterval(() => {
-      if (data && data.status !== 'queued' && data.status !== 'running') return;
+      const s = statusRef.current;
+      if (s && s !== 'queued' && s !== 'running') {
+        clearInterval(t);
+        return;
+      }
       load();
     }, 3000);
     return () => {
       cancelled = true;
       clearInterval(t);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [evalId]);
 
   if (error) return <ErrorState description={error} />;

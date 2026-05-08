@@ -49,6 +49,17 @@ export default function EvaluationsNew() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  // parseFloat with explicit NaN guard so 0 / 0.0 round-trip correctly
+  // (`parseFloat(...) || fallback` is wrong because 0 is falsy).
+  function safeFloat(raw: string, fallback: number): number {
+    const parsed = parseFloat(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  function safeInt(raw: string, fallback: number): number {
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.artifact_id || !form.dataset_version_id) {
@@ -58,16 +69,22 @@ export default function EvaluationsNew() {
     setLoading(true);
     setError(null);
     try {
-      const job = await apiPost<{ evaluationId: string; jobId: string }>('/api/evaluations', {
-        artifact_id: form.artifact_id,
-        dataset_version_id: form.dataset_version_id,
-        split: form.split,
-        cluster_id: form.cluster_id || null,
-        iou_threshold: form.iou_threshold,
-        score_threshold: form.score_threshold,
-        sample_fpfn_count: form.sample_fpfn_count,
-      });
-      navigate(`/evaluations/${(job as any).evaluationId || (job as any).id}`);
+      const job = await apiPost<{ evaluationId: string; jobId: string; id: string }>(
+        '/api/evaluations',
+        {
+          artifact_id: form.artifact_id,
+          dataset_version_id: form.dataset_version_id,
+          split: form.split,
+          cluster_id: form.cluster_id || null,
+          iou_threshold: form.iou_threshold,
+          score_threshold: form.score_threshold,
+          sample_fpfn_count: form.sample_fpfn_count,
+        }
+      );
+      if (!job.evaluationId) {
+        throw new Error('server response missing evaluationId');
+      }
+      navigate(`/evaluations/${job.evaluationId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start evaluation');
     } finally {
@@ -128,9 +145,7 @@ export default function EvaluationsNew() {
               max={1}
               step={0.05}
               value={form.iou_threshold}
-              onChange={(e) =>
-                setField('iou_threshold', parseFloat(e.target.value) || 0.5)
-              }
+              onChange={(e) => setField('iou_threshold', safeFloat(e.target.value, 0.5))}
             />
           </div>
           <div>
@@ -141,9 +156,7 @@ export default function EvaluationsNew() {
               max={1}
               step={0.05}
               value={form.score_threshold}
-              onChange={(e) =>
-                setField('score_threshold', parseFloat(e.target.value) || 0.25)
-              }
+              onChange={(e) => setField('score_threshold', safeFloat(e.target.value, 0.25))}
             />
           </div>
           <div>
@@ -153,9 +166,7 @@ export default function EvaluationsNew() {
               min={0}
               max={500}
               value={form.sample_fpfn_count}
-              onChange={(e) =>
-                setField('sample_fpfn_count', parseInt(e.target.value) || 0)
-              }
+              onChange={(e) => setField('sample_fpfn_count', safeInt(e.target.value, 0))}
             />
           </div>
           <div>

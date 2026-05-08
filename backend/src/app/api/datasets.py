@@ -75,6 +75,16 @@ def list_datasets(
     return result
 
 
+# NOTE: register the static `/datasets/formats` route BEFORE the dynamic
+# `/datasets/{dataset_id}` route — otherwise FastAPI matches "formats" as a
+# dataset id and returns 404.
+@router.get("/datasets/formats")
+def list_dataset_formats(
+    current_user: User = Depends(get_current_user),
+):
+    return {"formats": list(datumaro_service.SUPPORTED_FORMATS)}
+
+
 @router.get("/datasets/{dataset_id}")
 def get_dataset(
     dataset_id: str = Path(...),
@@ -181,13 +191,6 @@ def create_snapshot(
         "asset_count": v.asset_count,
         "locked": v.locked,
     }
-
-
-@router.get("/datasets/formats")
-def list_dataset_formats(
-    current_user: User = Depends(get_current_user),
-):
-    return {"formats": list(datumaro_service.SUPPORTED_FORMATS)}
 
 
 @router.post("/datasets/{dataset_id}/import", status_code=201)

@@ -83,43 +83,15 @@ def export_model(
 
 
 class PredictRequest(BaseModel):
-    """Predict from a base64-encoded image (alternative to multipart upload)."""
+    """JSON body for the base64 endpoint."""
 
     image_base64: str
     score_threshold: float = 0.25
 
 
-@router.post("/artifacts/models/{model_id}/predict")
-async def predict(
-    model_id: str,
-    file: UploadFile | None = File(None),
-    score_threshold: float = Form(0.25),
-    body: PredictRequest | None = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Run inference on the artifact. Accepts either multipart `file` or JSON
-    body with `image_base64`. Returns model predictions (detections / classification).
-    """
-    artifact = db.get(ModelArtifact, model_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Model not found")
-
-    if file is not None:
-        image_bytes = await file.read()
-        threshold = score_threshold
-    elif body is not None:
-        try:
-            image_bytes = base64.b64decode(body.image_base64)
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail="invalid base64") from exc
-        threshold = body.score_threshold
-    else:
-        raise HTTPException(status_code=400, detail="provide `file` or `image_base64`")
-
+def _predict_response(model_id: str, artifact, image_bytes: bytes, threshold: float) -> dict:
     if not image_bytes:
         raise HTTPException(status_code=400, detail="empty image")
-
     try:
         result = inference_service.predict(artifact, image_bytes, score_threshold=threshold)
     except inference_service.InferenceError as exc:
@@ -130,6 +102,44 @@ async def predict(
         "model_version": artifact.version,
         "result": result,
     }
+
+
+@router.post("/artifacts/models/{model_id}/predict")
+async def predict_multipart(
+    model_id: str,
+    file: UploadFile = File(...),
+    score_threshold: float = Form(0.25),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run inference on the artifact via multipart upload (`file` field).
+
+    Use this from browser file inputs / curl. For JSON callers, see
+    `/predict-json` which accepts a base64-encoded image.
+    """
+    artifact = db.get(ModelArtifact, model_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Model not found")
+    image_bytes = await file.read()
+    return _predict_response(model_id, artifact, image_bytes, score_threshold)
+
+
+@router.post("/artifacts/models/{model_id}/predict-json")
+def predict_json(
+    model_id: str,
+    body: PredictRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run inference on the artifact via a JSON body with a base64 image."""
+    artifact = db.get(ModelArtifact, model_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Model not found")
+    try:
+        image_bytes = base64.b64decode(body.image_base64)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid base64") from exc
+    return _predict_response(model_id, artifact, image_bytes, body.score_threshold)
 
 
 @router.post("/artifacts/cache/clear")

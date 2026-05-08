@@ -8,9 +8,11 @@ fronted by Triton in a later phase.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import threading
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,32 +26,45 @@ class InferenceError(Exception):
     pass
 
 
+@dataclass
+class _CacheEntry:
+    kind: str
+    model: Any
+    scratch_dir: Path  # the tempdir holding the downloaded weights
+
+
 class _ModelCache:
     """LRU cache keyed by artifact id. Thread-safe."""
 
     def __init__(self, max_size: int = MAX_MODELS) -> None:
         self.max_size = max_size
-        self._cache: OrderedDict[str, tuple[str, Any]] = OrderedDict()
+        self._cache: OrderedDict[str, _CacheEntry] = OrderedDict()
         self._lock = threading.RLock()
 
     def get_or_load(self, artifact: ModelArtifact) -> tuple[str, Any]:
         with self._lock:
             key = artifact.id
-            if key in self._cache:
+            entry = self._cache.get(key)
+            if entry is not None:
                 self._cache.move_to_end(key)
-                return self._cache[key]
-            loaded = _load_artifact(artifact)
-            self._cache[key] = loaded
+                return (entry.kind, entry.model)
+            kind, model, scratch = _load_artifact(artifact)
+            self._cache[key] = _CacheEntry(kind=kind, model=model, scratch_dir=scratch)
             while len(self._cache) > self.max_size:
-                self._cache.popitem(last=False)
-            return loaded
+                _, dropped = self._cache.popitem(last=False)
+                _safe_rmtree(dropped.scratch_dir)
+            return (kind, model)
 
     def evict(self, artifact_id: str) -> None:
         with self._lock:
-            self._cache.pop(artifact_id, None)
+            entry = self._cache.pop(artifact_id, None)
+            if entry is not None:
+                _safe_rmtree(entry.scratch_dir)
 
     def clear(self) -> None:
         with self._lock:
+            for entry in self._cache.values():
+                _safe_rmtree(entry.scratch_dir)
             self._cache.clear()
 
     def stats(self) -> dict[str, Any]:
@@ -59,6 +74,13 @@ class _ModelCache:
                 "max_size": self.max_size,
                 "loaded": list(self._cache.keys()),
             }
+
+
+def _safe_rmtree(path: Path) -> None:
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
 
 
 _cache = _ModelCache()
@@ -102,13 +124,16 @@ def predict(
 # ----------------------------------------------------------------------------
 
 
-def _load_artifact(artifact: ModelArtifact) -> tuple[str, Any]:
+def _load_artifact(artifact: ModelArtifact) -> tuple[str, Any, Path]:
+    """Returns (kind, model, scratch_dir). Caller owns cleanup of scratch_dir."""
     storage_path = artifact.storage_path
     if not storage_path:
         raise InferenceError("artifact has no storage_path")
 
-    local = Path(tempfile.mkdtemp()) / Path(storage_path).name
+    scratch = Path(tempfile.mkdtemp(prefix="vf-model-"))
+    local = scratch / Path(storage_path).name
     if not _download_to(storage_path, local):
+        _safe_rmtree(scratch)
         raise InferenceError(f"could not fetch artifact at {storage_path}")
 
     fmt = (artifact.format or artifact.type or "").lower()
@@ -116,14 +141,20 @@ def _load_artifact(artifact: ModelArtifact) -> tuple[str, Any]:
         try:
             import onnxruntime as ort  # type: ignore
         except Exception as exc:  # pragma: no cover
+            _safe_rmtree(scratch)
             raise InferenceError("onnxruntime not installed") from exc
-        return ("onnx", ort.InferenceSession(str(local), providers=["CPUExecutionProvider"]))
+        return (
+            "onnx",
+            ort.InferenceSession(str(local), providers=["CPUExecutionProvider"]),
+            scratch,
+        )
 
     try:
         from ultralytics import YOLO  # type: ignore
     except Exception as exc:  # pragma: no cover
+        _safe_rmtree(scratch)
         raise InferenceError("ultralytics not installed") from exc
-    return ("yolo", YOLO(str(local)))
+    return ("yolo", YOLO(str(local)), scratch)
 
 
 def _download_to(uri: str, dest: Path) -> bool:

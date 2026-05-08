@@ -77,13 +77,29 @@ def import_archive(
     with tempfile.TemporaryDirectory() as tmp:
         archive_dir = Path(tmp)
         with zipfile.ZipFile(io.BytesIO(archive_bytes)) as zf:
-            zf.extractall(archive_dir)
+            _safe_extract(zf, archive_dir)
 
         if fmt == "coco":
             return _import_coco(db, dataset, version, archive_dir, image_uri_base)
         if fmt == "yolo":
             return _import_yolo(db, dataset, version, archive_dir, image_uri_base)
         return _import_via_datumaro(db, dataset, version, archive_dir, fmt, image_uri_base)
+
+
+def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Extract a zip after rejecting any entry that would escape `dest`.
+
+    Defends against Zip Slip: entries with absolute paths or `..` components
+    that resolve outside the destination directory raise DatumaroError.
+    """
+    dest_resolved = dest.resolve()
+    for member in zf.infolist():
+        target = (dest / member.filename).resolve()
+        try:
+            target.relative_to(dest_resolved)
+        except ValueError as exc:
+            raise DatumaroError(f"unsafe path in archive: {member.filename!r}") from exc
+    zf.extractall(dest)
 
 
 def _import_coco(

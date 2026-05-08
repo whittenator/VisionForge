@@ -145,11 +145,13 @@ def get_asset_neighbors(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return previous/next asset ids in the same dataset version (by created_at).
+    """Return previous/next asset ids in the same dataset version.
 
-    Used by the annotator to navigate frames without leaving the editor.
+    Ordering is `(created_at, id)` ascending. Uses two indexed range queries
+    plus a count, so it stays O(log n) per call instead of materialising the
+    whole asset list.
     """
-    from sqlalchemy import asc, select
+    from sqlalchemy import and_, asc, desc, func, or_, select
 
     from app.models.asset import Asset
 
@@ -157,24 +159,61 @@ def get_asset_neighbors(
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    q = select(Asset).where(
-        Asset.dataset_id == asset.dataset_id,
-    )
+    base_filters = [Asset.dataset_id == asset.dataset_id]
     if asset.version_id:
-        q = q.where(Asset.version_id == asset.version_id)
+        base_filters.append(Asset.version_id == asset.version_id)
     if label_status:
-        q = q.where(Asset.label_status == label_status)
-    q = q.order_by(asc(Asset.created_at), asc(Asset.id))
+        base_filters.append(Asset.label_status == label_status)
 
-    ids = [a.id for a in db.scalars(q).all()]
-    if asset_id not in ids:
-        return {"prev": None, "next": None, "index": None, "total": len(ids)}
-    i = ids.index(asset_id)
+    # The ordering key is (created_at, id). "before" rows are strictly less
+    # than the cursor, "after" rows are strictly greater.
+    cursor_created = asset.created_at
+    cursor_id = asset.id
+
+    if cursor_created is None:
+        # No created_at to compare; fall back to id-only ordering.
+        before_filter = Asset.id < cursor_id
+        after_filter = Asset.id > cursor_id
+        order_before = (desc(Asset.id),)
+        order_after = (asc(Asset.id),)
+    else:
+        before_filter = or_(
+            Asset.created_at < cursor_created,
+            and_(Asset.created_at == cursor_created, Asset.id < cursor_id),
+        )
+        after_filter = or_(
+            Asset.created_at > cursor_created,
+            and_(Asset.created_at == cursor_created, Asset.id > cursor_id),
+        )
+        order_before = (desc(Asset.created_at), desc(Asset.id))
+        order_after = (asc(Asset.created_at), asc(Asset.id))
+
+    prev_id = db.scalar(
+        select(Asset.id).where(*base_filters, before_filter).order_by(*order_before).limit(1)
+    )
+    next_id = db.scalar(
+        select(Asset.id).where(*base_filters, after_filter).order_by(*order_after).limit(1)
+    )
+    total = (
+        db.scalar(
+            select(func.count()).select_from(select(Asset.id).where(*base_filters).subquery())
+        )
+        or 0
+    )
+    index_before = (
+        db.scalar(
+            select(func.count()).select_from(
+                select(Asset.id).where(*base_filters, before_filter).subquery()
+            )
+        )
+        or 0
+    )
+
     return {
-        "prev": ids[i - 1] if i > 0 else None,
-        "next": ids[i + 1] if i + 1 < len(ids) else None,
-        "index": i,
-        "total": len(ids),
+        "prev": prev_id,
+        "next": next_id,
+        "index": index_before,
+        "total": total,
     }
 
 

@@ -3,6 +3,9 @@
 We don't load a real model — just exercise the cache plumbing with stubs.
 """
 
+import tempfile
+from pathlib import Path
+
 from app.services import inference_service
 
 
@@ -14,6 +17,12 @@ class _Artifact:
         self.type = "yolo"
 
 
+def _stub_load(artifact):
+    """Pretend to load: returns (kind, model, scratch_dir) like the real loader."""
+    scratch = Path(tempfile.mkdtemp(prefix="vf-test-model-"))
+    return ("yolo", object(), scratch)
+
+
 def test_evict_and_clear_dont_raise():
     inference_service.evict("missing")
     inference_service._cache.clear()  # type: ignore[attr-defined]
@@ -21,13 +30,7 @@ def test_evict_and_clear_dont_raise():
 
 
 def test_lru_eviction_when_full(monkeypatch):
-    loaded: list[str] = []
-
-    def fake_load(artifact):
-        loaded.append(artifact.id)
-        return ("yolo", object())
-
-    monkeypatch.setattr(inference_service, "_load_artifact", fake_load)
+    monkeypatch.setattr(inference_service, "_load_artifact", _stub_load)
     monkeypatch.setattr(inference_service._cache, "max_size", 2)
     inference_service._cache.clear()  # type: ignore[attr-defined]
 
@@ -45,8 +48,33 @@ def test_get_returns_same_instance_within_capacity(monkeypatch):
     inference_service._cache.clear()  # type: ignore[attr-defined]
     monkeypatch.setattr(inference_service._cache, "max_size", 4)
     sentinel = object()
-    monkeypatch.setattr(inference_service, "_load_artifact", lambda art: ("yolo", sentinel))
+    sentinel_scratch = Path(tempfile.mkdtemp(prefix="vf-test-model-"))
+    monkeypatch.setattr(
+        inference_service, "_load_artifact", lambda art: ("yolo", sentinel, sentinel_scratch)
+    )
     a = _Artifact("x")
-    first = inference_service._cache.get_or_load(a)
-    second = inference_service._cache.get_or_load(a)
-    assert first is second
+    first_kind, first_model = inference_service._cache.get_or_load(a)
+    second_kind, second_model = inference_service._cache.get_or_load(a)
+    assert first_kind == second_kind == "yolo"
+    assert first_model is second_model is sentinel
+
+
+def test_evict_cleans_scratch_dir(monkeypatch, tmp_path):
+    """Evicting a cached entry must remove its on-disk scratch dir."""
+    inference_service._cache.clear()  # type: ignore[attr-defined]
+    monkeypatch.setattr(inference_service._cache, "max_size", 2)
+
+    created: list[Path] = []
+
+    def stub(artifact):
+        d = Path(tempfile.mkdtemp(prefix="vf-test-evict-", dir=tmp_path))
+        # Drop a file so the dir isn't empty
+        (d / "weights.pt").write_bytes(b"x")
+        created.append(d)
+        return ("yolo", object(), d)
+
+    monkeypatch.setattr(inference_service, "_load_artifact", stub)
+    inference_service._cache.get_or_load(_Artifact("e1"))
+    assert created[-1].exists()
+    inference_service.evict("e1")
+    assert not created[-1].exists()
