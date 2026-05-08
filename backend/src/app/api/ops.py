@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
@@ -12,6 +12,7 @@ from app.schemas.common import (
     UploadUrlRequest,
     UploadUrlResponse,
 )
+from app.services import cluster_service
 from app.services.ingest_service import get_presigned_upload
 from app.services.onnx_service import export_onnx as svc_export_onnx
 from app.services.training_service import launch_training
@@ -24,9 +25,7 @@ def get_upload_url(
     payload: UploadUrlRequest,
     current_user: User = Depends(get_current_user),
 ):
-    data = get_presigned_upload(
-        payload.datasetVersionId, payload.filename, payload.contentType
-    )
+    data = get_presigned_upload(payload.datasetVersionId, payload.filename, payload.contentType)
     # Derive the objectKey using the same path template as storage.presign_put_url
     object_key = f"datasets/{payload.datasetVersionId}/{payload.filename}"
     return UploadUrlResponse(
@@ -42,16 +41,20 @@ def train(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    job = launch_training(
-        db,
-        payload.projectId,
-        payload.datasetVersionId,
-        payload.task,
-        payload.params,
-        name=payload.name,
-        base_model=payload.baseModel,
-        owner_id=current_user.id,
-    )
+    try:
+        job = launch_training(
+            db,
+            payload.projectId,
+            payload.datasetVersionId,
+            payload.task,
+            payload.params,
+            name=payload.name,
+            base_model=payload.baseModel,
+            owner_id=current_user.id,
+            cluster_id=payload.clusterId,
+        )
+    except cluster_service.ClusterNotAvailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Job(**job)
 
 
@@ -61,5 +64,10 @@ def export_onnx(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    job = svc_export_onnx(db, payload.experimentId, payload.dynamicAxes)
+    try:
+        job = svc_export_onnx(
+            db, payload.experimentId, payload.dynamicAxes, cluster_id=payload.clusterId
+        )
+    except cluster_service.ClusterNotAvailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Job(**job)

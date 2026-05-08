@@ -4,6 +4,7 @@ from app.models.annotation import Annotation  # noqa: F401
 from app.models.annotation_schema import AnnotationSchema  # noqa: F401
 from app.models.artifact import ModelArtifact as Artifact  # noqa: F401
 from app.models.asset import Asset  # noqa: F401
+from app.models.cluster import Cluster  # noqa: F401
 from app.models.audit import Audit  # noqa: F401
 from app.models.admin import AuditEvent, Invitation, Notification  # noqa: F401
 from app.models.dataset import Dataset, ClassMap  # noqa: F401

@@ -21,6 +21,9 @@ class ExperimentRun(Base):
         String(36), ForeignKey("dataset_versions.id"), nullable=True
     )
     owner_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
+    cluster_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("clusters.id"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Unnamed Run")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     params_json: Mapped[str | None] = mapped_column("params", Text, nullable=True)  # DB column "params" mapped to params_json

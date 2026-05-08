@@ -22,11 +22,13 @@ class TrainRequest(BaseModel):
     baseModel: str = "yolov8n.pt"
     params: dict[str, Any] = {}
     name: str = "Training Run"
+    clusterId: Optional[str] = None
 
 
 class OnnxExportRequest(BaseModel):
     experimentId: str
     dynamicAxes: Optional[bool] = True
+    clusterId: Optional[str] = None
 
 
 class Job(BaseModel):

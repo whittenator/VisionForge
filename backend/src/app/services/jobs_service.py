@@ -40,4 +40,20 @@ def update_job_status(
     db.add(job)
     db.commit()
     db.refresh(job)
+
+    if status in ("succeeded", "failed", "cancelled"):
+        _release_cluster_for_job(db, job_id)
     return job
+
+
+def _release_cluster_for_job(db: Session, job_id: str) -> None:
+    """Release any cluster currently reserved for this job."""
+    from app.models.cluster import Cluster
+
+    cluster = db.query(Cluster).filter(Cluster.active_job_id == job_id).first()
+    if cluster:
+        cluster.active_job_id = None
+        if cluster.status == "busy":
+            cluster.status = "online"
+        db.add(cluster)
+        db.commit()

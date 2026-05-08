@@ -5,6 +5,7 @@ import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';
 import Alert from '@/components/ui/Alert';
 import Spinner from '@/components/ui/Spinner';
+import ClusterSelect from '@/components/common/ClusterSelect';
 import { apiGet, apiPost } from '@/services/api';
 
 interface Project { id: string; name: string; }
@@ -46,6 +47,7 @@ export default function ExperimentsNew() {
     name: 'Baseline',
     task: 'detect',
     baseModel: 'yolov8n.pt',
+    clusterId: '',
     epochs: 50,
     batchSize: 16,
     imageSize: 640,
@@ -89,6 +91,7 @@ export default function ExperimentsNew() {
         task: form.task,
         baseModel: form.baseModel,
         name: form.name,
+        clusterId: form.clusterId || null,
         params: {
           epochs: form.epochs,
           batch: form.batchSize,
@@ -192,6 +195,28 @@ export default function ExperimentsNew() {
                 </Select>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Cluster selection */}
+        <div className="border border-t-0 border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+          <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
+            <div className="h-1.5 w-1.5 bg-[var(--hud-accent)]" />
+            <span className="label-overline">Compute Cluster</span>
+          </div>
+          <div className="p-4 space-y-2">
+            <FieldLabel htmlFor="cluster-select">Run on cluster</FieldLabel>
+            <ClusterSelect
+              id="cluster-select"
+              kind="train"
+              value={form.clusterId}
+              onChange={(v) => setField('clusterId', v)}
+              allowAuto
+            />
+            <p className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">
+              Pick an idle cluster to dedicate this run, or leave on auto-assign to use the shared
+              queue. Busy clusters are listed but disabled.
+            </p>
           </div>
         </div>
 
