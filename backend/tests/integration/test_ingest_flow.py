@@ -4,6 +4,7 @@ from app.main import app
 
 client = TestClient(app)
 
+
 def test_ingest_flow_e2e():
     # Create project
     r = client.post("/api/projects", json={"name": "E2E", "description": "flow"})
@@ -18,7 +19,11 @@ def test_ingest_flow_e2e():
     # Request upload URL for dataset version
     r = client.post(
         "/api/ingest/upload-url",
-        json={"datasetVersionId": ds["activeVersionId"], "filename": "a.jpg", "contentType": "image/jpeg"},
+        json={
+            "datasetVersionId": ds["activeVersionId"],
+            "filename": "a.jpg",
+            "contentType": "image/jpeg",
+        },
     )
     assert r.status_code == 200
     body = r.json()

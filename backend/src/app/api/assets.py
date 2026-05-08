@@ -138,6 +138,46 @@ def dataset_stats(
     return get_dataset_stats(db, dataset_id, version_id=version_id)
 
 
+@router.get("/assets/{asset_id}/neighbors")
+def get_asset_neighbors(
+    asset_id: str = Path(...),
+    label_status: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return previous/next asset ids in the same dataset version (by created_at).
+
+    Used by the annotator to navigate frames without leaving the editor.
+    """
+    from sqlalchemy import asc, select
+
+    from app.models.asset import Asset
+
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    q = select(Asset).where(
+        Asset.dataset_id == asset.dataset_id,
+    )
+    if asset.version_id:
+        q = q.where(Asset.version_id == asset.version_id)
+    if label_status:
+        q = q.where(Asset.label_status == label_status)
+    q = q.order_by(asc(Asset.created_at), asc(Asset.id))
+
+    ids = [a.id for a in db.scalars(q).all()]
+    if asset_id not in ids:
+        return {"prev": None, "next": None, "index": None, "total": len(ids)}
+    i = ids.index(asset_id)
+    return {
+        "prev": ids[i - 1] if i > 0 else None,
+        "next": ids[i + 1] if i + 1 < len(ids) else None,
+        "index": i,
+        "total": len(ids),
+    }
+
+
 @router.post("/ingest/confirm", status_code=201)
 def confirm_asset_upload(
     body: ConfirmUploadRequest,

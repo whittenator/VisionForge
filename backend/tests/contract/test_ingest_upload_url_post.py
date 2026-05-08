@@ -4,6 +4,7 @@ from app.main import app
 
 client = TestClient(app)
 
+
 def test_ingest_upload_url_contract():
     r = client.post(
         "/api/ingest/upload-url",

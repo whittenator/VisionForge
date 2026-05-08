@@ -4,6 +4,7 @@ from app.main import app
 
 client = TestClient(app)
 
+
 def test_create_project_contract():
     payload = {"name": "Demo", "description": "Test"}
     r = client.post("/api/projects", json=payload)

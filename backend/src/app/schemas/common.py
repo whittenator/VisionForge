@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel
 class UploadUrlRequest(BaseModel):
     datasetVersionId: str
     filename: str
-    contentType: Optional[str] = None
+    contentType: str | None = None
 
 
 class UploadUrlResponse(BaseModel):
@@ -22,13 +22,13 @@ class TrainRequest(BaseModel):
     baseModel: str = "yolov8n.pt"
     params: dict[str, Any] = {}
     name: str = "Training Run"
-    clusterId: Optional[str] = None
+    clusterId: str | None = None
 
 
 class OnnxExportRequest(BaseModel):
     experimentId: str
-    dynamicAxes: Optional[bool] = True
-    clusterId: Optional[str] = None
+    dynamicAxes: bool | None = True
+    clusterId: str | None = None
 
 
 class Job(BaseModel):
@@ -37,5 +37,5 @@ class Job(BaseModel):
     type: str
     status: str
     progress: float
-    errorMessage: Optional[str] = None
-    createdAt: Optional[str] = None
+    errorMessage: str | None = None
+    createdAt: str | None = None

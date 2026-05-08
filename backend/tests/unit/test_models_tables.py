@@ -46,5 +46,5 @@ def test_tables_exist(tmp_path):
     }
 
     actual_tables = set(insp.get_table_names())
-    
+
     assert expected.issubset(actual_tables)

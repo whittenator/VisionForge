@@ -34,9 +34,7 @@ def create_dataset(
     return ds, ver
 
 
-def snapshot_version(
-    db: Session, dataset_id: str, notes: str | None = None
-) -> DatasetVersion:
+def snapshot_version(db: Session, dataset_id: str, notes: str | None = None) -> DatasetVersion:
     """Create a new locked snapshot version for a dataset."""
     # Compute next version number
     versions = list(

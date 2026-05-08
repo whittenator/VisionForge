@@ -18,6 +18,7 @@ from app.api.artifacts import router as artifacts_router
 from app.api.auth import router as auth_router
 from app.api.clusters import router as clusters_router
 from app.api.datasets import router as datasets_router
+from app.api.evaluations import router as evaluations_router
 from app.api.experiments import router as experiments_router
 from app.api.jobs import router as jobs_router
 from app.api.middleware import auth_rate_limit_middleware, logging_middleware
@@ -122,6 +123,7 @@ app.include_router(jobs_router)
 app.include_router(experiments_router)
 app.include_router(artifacts_router)
 app.include_router(clusters_router)
+app.include_router(evaluations_router)
 
 # New feature routers (conditionally registered based on availability)
 if _has_annotations:

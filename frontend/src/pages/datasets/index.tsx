@@ -58,12 +58,20 @@ export default function DatasetsIndex() {
             )}
           </h1>
         </div>
-        <Link
-          to={uploadTo}
-          className="inline-flex items-center h-8 px-3 text-xs font-mono font-medium border border-[var(--hud-accent)] bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)] hover:bg-[var(--hud-accent-hover)] transition-colors tracking-wide"
-        >
-          + UPLOAD DATASET
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/datasets/import"
+            className="inline-flex items-center h-8 px-3 text-xs font-mono text-[var(--hud-text-secondary)] border border-[var(--hud-border-strong)] hover:border-[var(--hud-border-accent)] hover:bg-[var(--hud-elevated)] transition-colors tracking-wide"
+          >
+            IMPORT (COCO/YOLO/...)
+          </Link>
+          <Link
+            to={uploadTo}
+            className="inline-flex items-center h-8 px-3 text-xs font-mono font-medium border border-[var(--hud-accent)] bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)] hover:bg-[var(--hud-accent-hover)] transition-colors tracking-wide"
+          >
+            + UPLOAD DATASET
+          </Link>
+        </div>
       </div>
 
       {datasets.length === 0 ? (

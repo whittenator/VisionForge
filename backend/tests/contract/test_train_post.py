@@ -4,6 +4,7 @@ from app.main import app
 
 client = TestClient(app)
 
+
 def test_train_contract():
     r = client.post(
         "/api/train",
