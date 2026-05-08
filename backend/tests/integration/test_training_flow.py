@@ -4,6 +4,7 @@ from app.main import app
 
 client = TestClient(app)
 
+
 def test_training_flow_e2e():
     # Create project
     r = client.post("/api/projects", json={"name": "Train", "description": "flow"})
@@ -16,7 +17,12 @@ def test_training_flow_e2e():
 
     r = client.post(
         "/api/train",
-        json={"projectId": proj["id"], "datasetVersionId": "v1", "task": "classification", "params": {}},
+        json={
+            "projectId": proj["id"],
+            "datasetVersionId": "v1",
+            "task": "classification",
+            "params": {},
+        },
     )
     assert r.status_code == 202
     body = r.json()

@@ -37,8 +37,12 @@ class Membership(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
-    workspace_id: Mapped[str] = mapped_column(String(36), ForeignKey("workspaces.id"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id"), nullable=False
+    )
     role: Mapped[Role] = mapped_column(String(32), nullable=False, default=Role.VIEWER)
-    invited_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    invited_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
     invited_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     accepted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)

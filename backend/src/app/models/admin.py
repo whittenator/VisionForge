@@ -16,7 +16,9 @@ class Invitation(Base):
     __tablename__ = "invitations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    workspace_id: Mapped[str] = mapped_column(String(36), ForeignKey("workspaces.id"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("workspaces.id"), nullable=False
+    )
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     token: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)

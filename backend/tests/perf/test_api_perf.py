@@ -14,11 +14,13 @@ ROUTES = [
     ),
 ]
 
+
 def p95(latencies):
     latencies = sorted(latencies)
     idx = int(len(latencies) * 0.95) - 1
-    idx = max(0, min(idx, len(latencies)-1))
+    idx = max(0, min(idx, len(latencies) - 1))
     return latencies[idx]
+
 
 def test_core_api_p95_under_200ms():
     latencies = []

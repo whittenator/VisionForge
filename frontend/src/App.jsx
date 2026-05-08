@@ -24,6 +24,11 @@ import ActiveLearningNew from "./pages/active-learning/new";
 import ALRunDetail from "./pages/active-learning/[alRunId]";
 import ClustersIndex from "./pages/clusters/index";
 import ClustersNew from "./pages/clusters/new";
+import EvaluationsIndex from "./pages/evaluations/index";
+import EvaluationsNew from "./pages/evaluations/new";
+import EvaluationDetail from "./pages/evaluations/[evalId]";
+import ArtifactsPredict from "./pages/artifacts/predict";
+import DatasetImport from "./pages/datasets/import";
 import { apiGet } from "@/services/api";
 import Spinner from "@/components/ui/Spinner";
 
@@ -196,6 +201,13 @@ export default function App() {
             {/* Clusters */}
             <Route path="/clusters" element={<ProtectedRoute><ClustersIndex /></ProtectedRoute>} />
             <Route path="/clusters/new" element={<ProtectedRoute><ClustersNew /></ProtectedRoute>} />
+            {/* Evaluations */}
+            <Route path="/evaluations" element={<ProtectedRoute><EvaluationsIndex /></ProtectedRoute>} />
+            <Route path="/evaluations/new" element={<ProtectedRoute><EvaluationsNew /></ProtectedRoute>} />
+            <Route path="/evaluations/:evalId" element={<ProtectedRoute><EvaluationDetail /></ProtectedRoute>} />
+            {/* Predict + import */}
+            <Route path="/artifacts/predict/:modelId" element={<ProtectedRoute><ArtifactsPredict /></ProtectedRoute>} />
+            <Route path="/datasets/import" element={<ProtectedRoute><DatasetImport /></ProtectedRoute>} />
             {/* Annotate */}
             <Route path="/annotate/:assetId" element={<ProtectedRoute><AnnotatorPage /></ProtectedRoute>} />
             {/* Admin */}

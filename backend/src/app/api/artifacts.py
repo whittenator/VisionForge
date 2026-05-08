@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import base64
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
@@ -10,6 +13,7 @@ from app.models.dataset_version import DatasetVersion
 from app.models.experiment import ExperimentRun
 from app.models.user import User
 from app.schemas.common import Job
+from app.services import inference_service
 from app.services.onnx_service import export_onnx as svc_export_onnx
 
 router = APIRouter(prefix="/api", tags=["artifacts"])
@@ -78,6 +82,72 @@ def export_model(
     return Job(**job)
 
 
+class PredictRequest(BaseModel):
+    """Predict from a base64-encoded image (alternative to multipart upload)."""
+
+    image_base64: str
+    score_threshold: float = 0.25
+
+
+@router.post("/artifacts/models/{model_id}/predict")
+async def predict(
+    model_id: str,
+    file: UploadFile | None = File(None),
+    score_threshold: float = Form(0.25),
+    body: PredictRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run inference on the artifact. Accepts either multipart `file` or JSON
+    body with `image_base64`. Returns model predictions (detections / classification).
+    """
+    artifact = db.get(ModelArtifact, model_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    if file is not None:
+        image_bytes = await file.read()
+        threshold = score_threshold
+    elif body is not None:
+        try:
+            image_bytes = base64.b64decode(body.image_base64)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="invalid base64") from exc
+        threshold = body.score_threshold
+    else:
+        raise HTTPException(status_code=400, detail="provide `file` or `image_base64`")
+
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="empty image")
+
+    try:
+        result = inference_service.predict(artifact, image_bytes, score_threshold=threshold)
+    except inference_service.InferenceError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "model_id": model_id,
+        "model_name": artifact.name,
+        "model_version": artifact.version,
+        "result": result,
+    }
+
+
+@router.post("/artifacts/cache/clear")
+def clear_inference_cache(
+    current_user: User = Depends(get_current_user),
+):
+    """Drop all loaded models from the in-process inference cache."""
+    inference_service._cache.clear()  # type: ignore[attr-defined]
+    return {"ok": True}
+
+
+@router.get("/artifacts/cache")
+def get_inference_cache(
+    current_user: User = Depends(get_current_user),
+):
+    return inference_service.cache_stats()
+
+
 @router.get("/artifacts/models/{model_id}/lineage")
 def get_lineage(
     model_id: str,
@@ -89,9 +159,7 @@ def get_lineage(
         raise HTTPException(status_code=404, detail="Model not found")
     run = db.get(ExperimentRun, artifact.run_id) if artifact.run_id else None
     version = (
-        db.get(DatasetVersion, run.dataset_version_id)
-        if run and run.dataset_version_id
-        else None
+        db.get(DatasetVersion, run.dataset_version_id) if run and run.dataset_version_id else None
     )
     dataset = db.get(Dataset, version.dataset_id) if version else None
     return {
@@ -102,13 +170,7 @@ def get_lineage(
             "type": artifact.type,
             "format": artifact.format,
         },
-        "experiment_run": (
-            {"id": run.id, "name": run.name, "status": run.status} if run else None
-        ),
-        "dataset_version": (
-            {"id": version.id, "version": version.version} if version else None
-        ),
-        "dataset": (
-            {"id": dataset.id, "name": dataset.name} if dataset else None
-        ),
+        "experiment_run": ({"id": run.id, "name": run.name, "status": run.status} if run else None),
+        "dataset_version": ({"id": version.id, "version": version.version} if version else None),
+        "dataset": ({"id": dataset.id, "name": dataset.name} if dataset else None),
     }

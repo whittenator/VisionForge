@@ -19,7 +19,9 @@ def test_get_job_returns_status():
     client = TestClient(app)
 
     # Create a job in the DB
-    db: Session = next(app.dependency_overrides[get_db]()) if get_db in app.dependency_overrides else None
+    db: Session = (
+        next(app.dependency_overrides[get_db]()) if get_db in app.dependency_overrides else None
+    )
     if db is None:
         # Fallback to building a Session like conftest does is unnecessary here; tests set override
         raise RuntimeError("DB override not set for tests")

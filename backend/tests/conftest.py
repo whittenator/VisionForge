@@ -39,9 +39,10 @@ Base.metadata.create_all(bind=engine)
 
 # Seed a demo user for auth contract tests
 try:
-    from app.services.auth import register
     from sqlalchemy import select
+
     from app.models.user import User
+    from app.services.auth import register
 
     with TestingSessionLocal() as _db:
         exists = _db.scalar(select(User).where(User.email == "demo@example.com"))
@@ -51,12 +52,14 @@ except Exception:
     # Keep tests running even if seeding fails; auth tests may handle absence
     pass
 
+
 def override_get_db() -> Generator:
     db = TestingSessionLocal()
     try:
         yield db
     finally:
         db.close()
+
 
 app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)

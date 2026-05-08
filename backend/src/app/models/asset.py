@@ -17,7 +17,9 @@ class Asset(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     dataset_id: Mapped[str] = mapped_column(String(36), ForeignKey("datasets.id"), nullable=False)
-    version_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("dataset_versions.id"), nullable=True)
+    version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("dataset_versions.id"), nullable=True
+    )
     uri: Mapped[str] = mapped_column(String(500), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)

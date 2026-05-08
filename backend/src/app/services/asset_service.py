@@ -82,9 +82,7 @@ def get_dataset_stats(db: Session, dataset_id: str, version_id: str | None = Non
     # Class distribution from annotations
     class_counts: dict[str, int] = {}
     if asset_ids:
-        anns = list(
-            db.scalars(select(Annotation).where(Annotation.asset_id.in_(asset_ids))).all()
-        )
+        anns = list(db.scalars(select(Annotation).where(Annotation.asset_id.in_(asset_ids))).all())
         for ann in anns:
             cls = ann.class_name or "unlabeled"
             class_counts[cls] = class_counts.get(cls, 0) + 1
