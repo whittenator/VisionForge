@@ -102,11 +102,15 @@ def test_export_roundtrip_coco(db):
     # First import a small COCO so we have data to export
     coco = {
         "images": [{"id": 1, "file_name": "a.jpg", "width": 100, "height": 100}],
-        "annotations": [{"id": 1, "image_id": 1, "category_id": 1, "bbox": [1, 2, 3, 4]}],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [1, 2, 3, 4]}
+        ],
         "categories": [{"id": 1, "name": "car"}],
     }
     archive = _zip_files({"annotations.json": json.dumps(coco).encode()})
-    import_archive(db, dataset_id="d1", version_id="v1", archive_bytes=archive, fmt="coco")
+    import_archive(
+        db, dataset_id="d1", version_id="v1", archive_bytes=archive, fmt="coco"
+    )
     blob = export_archive(db, dataset_id="d1", version_id="v1", fmt="coco")
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         names = zf.namelist()
@@ -120,11 +124,15 @@ def test_export_roundtrip_coco(db):
 def test_export_yolo_writes_labels_and_classes(db):
     coco = {
         "images": [{"id": 1, "file_name": "a.jpg", "width": 100, "height": 100}],
-        "annotations": [{"id": 1, "image_id": 1, "category_id": 1, "bbox": [10, 20, 30, 40]}],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [10, 20, 30, 40]}
+        ],
         "categories": [{"id": 1, "name": "car"}],
     }
     archive = _zip_files({"annotations.json": json.dumps(coco).encode()})
-    import_archive(db, dataset_id="d1", version_id="v1", archive_bytes=archive, fmt="coco")
+    import_archive(
+        db, dataset_id="d1", version_id="v1", archive_bytes=archive, fmt="coco"
+    )
     blob = export_archive(db, dataset_id="d1", version_id="v1", fmt="yolo")
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         names = zf.namelist()
@@ -132,3 +140,34 @@ def test_export_yolo_writes_labels_and_classes(db):
         assert any(n.startswith("labels/") for n in names)
         cls = zf.read("classes.txt").decode().strip()
         assert "car" in cls
+
+
+def test_export_yolo_disambiguates_colliding_stems(db):
+    """Two assets with the same filename stem must produce distinct label files."""
+    # Import two images that share the same basename in different folders.
+    coco = {
+        "images": [
+            {"id": 1, "file_name": "train/img.jpg", "width": 100, "height": 100},
+            {"id": 2, "file_name": "val/img.jpg", "width": 100, "height": 100},
+        ],
+        "annotations": [
+            {"id": 1, "image_id": 1, "category_id": 1, "bbox": [1, 2, 3, 4]},
+            {"id": 2, "image_id": 2, "category_id": 1, "bbox": [5, 6, 7, 8]},
+        ],
+        "categories": [{"id": 1, "name": "car"}],
+    }
+    archive = _zip_files({"annotations.json": json.dumps(coco).encode()})
+    import_archive(
+        db, dataset_id="d1", version_id="v1", archive_bytes=archive, fmt="coco"
+    )
+
+    blob = export_archive(db, dataset_id="d1", version_id="v1", fmt="yolo")
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        label_files = [n for n in zf.namelist() if n.startswith("labels/")]
+        # Both labels must be present — neither must overwrite the other.
+        assert len(label_files) == 2
+        assert len(set(label_files)) == 2
+        # Manifest carries the asset → label mapping for reconstruction.
+        manifest = zf.read("manifest.csv").decode().splitlines()
+        assert manifest[0] == "asset_id,uri,label_file"
+        assert len(manifest) == 3

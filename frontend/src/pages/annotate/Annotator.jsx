@@ -446,12 +446,14 @@ export default function AnnotatorPage() {
         dirty: true,
         version: 0,
       };
+      let newIdx = 0;
       setAnnotations((prev) => {
+        newIdx = prev.length; // index of the appended item in the new array
         const updated = [...prev, newAnn];
         annotationsRef.current = updated;
         return updated;
       });
-      setSelectedAnnotationIdx(annotationsRef.current.length);
+      setSelectedAnnotationIdx(newIdx);
       setDirty(true);
       redraw();
     } else if (m === 'select') {
@@ -493,12 +495,14 @@ export default function AnnotatorPage() {
       dirty: true,
       version: 0,
     };
+    let newIdx = 0;
     setAnnotations((prev) => {
+      newIdx = prev.length;
       const updated = [...prev, newAnn];
       annotationsRef.current = updated;
       return updated;
     });
-    setSelectedAnnotationIdx(annotationsRef.current.length);
+    setSelectedAnnotationIdx(newIdx);
     setDirty(true);
     redraw();
   }
@@ -519,14 +523,16 @@ export default function AnnotatorPage() {
       dirty: true,
       version: 0,
     };
+    let newIdx = 0;
     setAnnotations((prev) => {
+      newIdx = prev.length;
       const updated = [...prev, newAnn];
       annotationsRef.current = updated;
       return updated;
     });
     polygonInProgressRef.current = [];
     setPolygonInProgress([]);
-    setSelectedAnnotationIdx(annotationsRef.current.length);
+    setSelectedAnnotationIdx(newIdx);
     setDirty(true);
     setStatus('Polygon finalized');
   }

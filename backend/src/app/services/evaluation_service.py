@@ -26,7 +26,15 @@ def create_evaluation(
 ) -> tuple[Evaluation, dict[str, Any]]:
     """Create an Evaluation row and dispatch the eval Celery task.
 
-    Returns the row and the job dict for the API response.
+    Sequence:
+      1. Validate inputs (artifact + dataset version exist).
+      2. Create the Evaluation row (queued, no cluster yet).
+      3. Create the Job row so we have a real job id.
+      4. Reserve the cluster atomically with the real job id (or release on
+         failure).
+      5. Dispatch the Celery task. If dispatch fails AND a cluster was
+         reserved, release it and mark the evaluation/job as failed instead
+         of leaking capacity.
     """
     artifact = db.get(ModelArtifact, payload.artifact_id)
     if not artifact:
@@ -34,9 +42,6 @@ def create_evaluation(
     version = db.get(DatasetVersion, payload.dataset_version_id)
     if not version:
         raise EvaluationError("dataset version not found")
-
-    if payload.cluster_id:
-        cluster_service.reserve_cluster(db, payload.cluster_id, job_id="pending", kind="eval")
 
     eval_row = Evaluation(
         project_id=artifact.project_id,
@@ -49,7 +54,7 @@ def create_evaluation(
     db.commit()
     db.refresh(eval_row)
 
-    task_payload = {
+    task_payload: dict[str, Any] = {
         "evaluationId": eval_row.id,
         "artifactId": artifact.id,
         "datasetVersionId": version.id,
@@ -65,31 +70,68 @@ def create_evaluation(
     db.add(eval_row)
     db.commit()
     db.refresh(eval_row)
-
-    if payload.cluster_id:
-        cluster = cluster_service.get_cluster(db, payload.cluster_id)
-        if cluster:
-            cluster.active_job_id = job_row.id
-            db.add(cluster)
-            db.commit()
-
     task_payload["jobId"] = job_row.id
+
+    # Reserve the cluster with the real job id. If reservation fails, the
+    # error propagates and the caller turns it into a 409.
+    if payload.cluster_id:
+        try:
+            cluster_service.reserve_cluster(
+                db, payload.cluster_id, job_id=job_row.id, kind="eval"
+            )
+        except Exception:
+            # Mark the queued rows as failed so the dashboard doesn't show a
+            # phantom queued evaluation.
+            from app.services.jobs_service import update_job_status
+
+            write_result(
+                db,
+                eval_row.id,
+                status="failed",
+                error_message="cluster reservation failed",
+            )
+            try:
+                update_job_status(db, job_row.id, status="failed", progress=0.0)
+            except Exception:
+                pass
+            raise
+
     queue = f"cluster.{payload.cluster_id}" if payload.cluster_id else None
     try:
         send_kwargs: dict[str, Any] = {"args": [task_payload]}
         if queue:
             send_kwargs["queue"] = queue
         celery_app.send_task("app.jobs.tasks.evaluation.evaluate_task", **send_kwargs)
-    except Exception:
-        # Broker may not be available in some envs (tests); the row is the
-        # contract — the worker will pick it up when the broker is online.
-        pass
+    except Exception as exc:
+        # Broker may not be available. If we already reserved a cluster, the
+        # worker will never pick the task up — release the cluster and mark
+        # the evaluation failed instead of holding capacity indefinitely.
+        if payload.cluster_id:
+            try:
+                cluster_service.release_cluster(db, payload.cluster_id)
+            except Exception:
+                pass
+            from app.services.jobs_service import update_job_status
+
+            write_result(
+                db,
+                eval_row.id,
+                status="failed",
+                error_message=f"task dispatch failed: {exc}",
+            )
+            try:
+                update_job_status(db, job_row.id, status="failed", progress=0.0)
+            except Exception:
+                pass
+            raise EvaluationError(f"failed to dispatch evaluation task: {exc}") from exc
+        # No cluster reserved — the row is the contract; a worker can still
+        # pick it up when the broker is back. Leave it queued.
 
     job_dict = {
         "id": job_row.id,
         "jobId": job_row.id,
         "type": "evaluation",
-        "status": "queued",
+        "status": eval_row.status,
         "progress": 0.0,
         "evaluationId": eval_row.id,
         "clusterId": payload.cluster_id,

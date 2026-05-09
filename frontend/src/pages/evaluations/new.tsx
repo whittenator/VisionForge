@@ -130,8 +130,13 @@ export default function EvaluationsNew() {
           >
             <option value="">— select —</option>
             {datasets.map((d) => (
-              <option key={d.id} value={d.latest_version_id || d.id}>
+              <option
+                key={d.id}
+                value={d.latest_version_id || ''}
+                disabled={!d.latest_version_id}
+              >
                 {d.name}
+                {!d.latest_version_id ? ' (no versions yet)' : ''}
               </option>
             ))}
           </Select>

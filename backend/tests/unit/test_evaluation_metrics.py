@@ -89,3 +89,22 @@ def test_detection_iou_below_threshold_is_fp():
     # Pred doesn't match → FP and FN (no match)
     assert pc["precision"] == 0.0
     assert pc["recall"] == 0.0
+
+
+def test_detection_confusion_records_cross_class_match():
+    """Wrong-class predictions that match a GT by IoU must populate off-diagonal."""
+    items = [
+        {
+            "asset_id": "a",
+            "gt": [{"class": "car", "bbox": (0, 0, 10, 10)}],
+            "pred": [{"class": "truck", "bbox": (0, 0, 10, 10), "score": 0.9}],
+        }
+    ]
+    out = compute_detection_metrics(items, ["car", "truck"], iou_threshold=0.5)
+    cm = out["confusion"]
+    # rows = GT, cols = pred. GT was car (idx 0), pred was truck (idx 1).
+    assert cm[0][1] == 1
+    assert cm[0][0] == 0
+    # Class-strict pass: it's still an FP for truck and an FN for car.
+    assert out["per_class"]["car"]["recall"] == 0.0
+    assert out["per_class"]["truck"]["precision"] == 0.0

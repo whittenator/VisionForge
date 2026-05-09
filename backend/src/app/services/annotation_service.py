@@ -19,7 +19,9 @@ class VersionConflictError(AnnotationError):
 
 
 def get_asset_annotations(db: Session, asset_id: str) -> list[Annotation]:
-    return list(db.scalars(select(Annotation).where(Annotation.asset_id == asset_id)).all())
+    return list(
+        db.scalars(select(Annotation).where(Annotation.asset_id == asset_id)).all()
+    )
 
 
 def create_annotation(
@@ -70,26 +72,39 @@ def update_annotation(
         raise VersionConflictError(
             f"annotation version mismatch: have {ann.version}, expected {expected_version}"
         )
-    if geometry is not None:
+
+    # Determine whether anything actually changes. An update with neither
+    # field is a no-op — return the current row without bumping the version
+    # (which would create needless optimistic-lock conflicts).
+    geometry_changing = geometry is not None
+    class_changing = class_name is not None and class_name != ann.class_name
+    if not geometry_changing and not class_changing:
+        return ann
+
+    if geometry_changing:
         _validate_geometry(ann.type, geometry)
-        # Push the previous state into history (cap at 20)
-        history: list[dict] = []
-        if ann.history:
-            try:
-                history = json.loads(ann.history) or []
-            except Exception:
-                history = []
-        history.append(
-            {
-                "version": ann.version,
-                "geometry": ann.geometry,
-                "class_name": ann.class_name,
-                "updated_at": ann.updated_at.isoformat() if ann.updated_at else None,
-            }
-        )
-        ann.history = json.dumps(history[-20:])
+
+    # Snapshot the previous state into history whenever either the geometry
+    # OR the class label changes, so the audit trail is faithful.
+    history: list[dict] = []
+    if ann.history:
+        try:
+            history = json.loads(ann.history) or []
+        except Exception:
+            history = []
+    history.append(
+        {
+            "version": ann.version,
+            "geometry": ann.geometry,
+            "class_name": ann.class_name,
+            "updated_at": ann.updated_at.isoformat() if ann.updated_at else None,
+        }
+    )
+    ann.history = json.dumps(history[-20:])
+
+    if geometry_changing:
         ann.geometry = json.dumps(geometry)
-    if class_name is not None:
+    if class_changing:
         ann.class_name = class_name
     ann.version = (ann.version or 1) + 1
     ann.updated_at = datetime.now(timezone.utc)

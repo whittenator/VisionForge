@@ -32,6 +32,14 @@ class OnnxExportRequest(BaseModel):
 
 
 class Job(BaseModel):
+    """Generic async job response.
+
+    Includes optional linkage fields so callers can wire the job back to the
+    domain object that spawned it (training run / evaluation / cluster) without
+    a second round trip and without `response_model=Job` silently dropping
+    the field.
+    """
+
     id: str
     jobId: str
     type: str
@@ -39,3 +47,6 @@ class Job(BaseModel):
     progress: float
     errorMessage: str | None = None
     createdAt: str | None = None
+    clusterId: str | None = None
+    experimentId: str | None = None
+    evaluationId: str | None = None

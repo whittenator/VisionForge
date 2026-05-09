@@ -152,19 +152,25 @@ def compute_detection_metrics(
 
     for item in items:
         gts = list(item.get("gt") or [])
-        preds = sorted(item.get("pred") or [], key=lambda p: -float(p.get("score", 0.0)))
-        used = [False] * len(gts)
+        preds = sorted(
+            item.get("pred") or [], key=lambda p: -float(p.get("score", 0.0))
+        )
         for cls in {g.get("class") for g in gts}:
             if cls in idx:
                 pr_npos[cls] += sum(1 for g in gts if g.get("class") == cls)
         for g in gts:
             if g.get("class") in idx:
                 support[g["class"]] += 1
+
+        # ---- Pass 1: class-STRICT matching for TP / FP / FN / AP ----
+        # Each prediction is greedily matched to the highest-IoU same-class GT
+        # above the threshold. This is the standard mAP@iou definition.
+        used_strict = [False] * len(gts)
         for p in preds:
             best_j = -1
             best_iou = 0.0
             for j, g in enumerate(gts):
-                if used[j]:
+                if used_strict[j]:
                     continue
                 if g.get("class") != p.get("class"):
                     continue
@@ -174,20 +180,40 @@ def compute_detection_metrics(
                     best_j = j
             cls = p.get("class")
             if best_j >= 0 and best_iou >= iou_threshold:
-                used[best_j] = True
+                used_strict[best_j] = True
                 if cls in idx:
                     tp[cls] += 1
-                    matrix[idx[cls]][idx[cls]] += 1
                 pr_data[cls].append((float(p.get("score", 0.0)), 1))
             else:
                 if cls in idx:
                     fp[cls] += 1
                 pr_data[cls].append((float(p.get("score", 0.0)), 0))
         for j, g in enumerate(gts):
-            if not used[j]:
+            if not used_strict[j]:
                 cls = g.get("class")
                 if cls in idx:
                     fn[cls] += 1
+
+        # ---- Pass 2: class-AGNOSTIC matching for the confusion matrix ----
+        # Match each prediction to its best-IoU GT regardless of class so we
+        # can record off-diagonal cells (predicted X when ground truth was Y).
+        used_any = [False] * len(gts)
+        for p in preds:
+            best_j = -1
+            best_iou = 0.0
+            for j, g in enumerate(gts):
+                if used_any[j]:
+                    continue
+                iou = _iou(tuple(p["bbox"]), tuple(g["bbox"]))
+                if iou > best_iou:
+                    best_iou = iou
+                    best_j = j
+            if best_j >= 0 and best_iou >= iou_threshold:
+                used_any[best_j] = True
+                pred_cls = p.get("class")
+                gt_cls = gts[best_j].get("class")
+                if pred_cls in idx and gt_cls in idx:
+                    matrix[idx[gt_cls]][idx[pred_cls]] += 1
 
     per_class: dict[str, Any] = {}
     macro_p = macro_r = macro_f1 = macro_ap = 0.0
@@ -380,7 +406,9 @@ def evaluate_task(payload: dict) -> dict:
         # Determine task: detection if any annotation has type "box", else classification
         first_asset_anns = list(
             db.scalars(
-                select(Annotation).where(Annotation.asset_id.in_([a.id for a in assets[:50]]))
+                select(Annotation).where(
+                    Annotation.asset_id.in_([a.id for a in assets[:50]])
+                )
             ).all()
         )
         is_detection = any(a.type == "box" for a in first_asset_anns)
@@ -396,7 +424,9 @@ def evaluate_task(payload: dict) -> dict:
             samples: list[dict[str, Any]] = []
             for i, asset in enumerate(assets):
                 anns = list(
-                    db.scalars(select(Annotation).where(Annotation.asset_id == asset.id)).all()
+                    db.scalars(
+                        select(Annotation).where(Annotation.asset_id == asset.id)
+                    ).all()
                 )
                 gts = []
                 for a in anns:
@@ -469,7 +499,9 @@ def evaluate_task(payload: dict) -> dict:
                         progress=0.1 + 0.85 * (i / len(assets)),
                     )
 
-            result = compute_detection_metrics(items, classes, iou_threshold=iou_threshold)
+            result = compute_detection_metrics(
+                items, classes, iou_threshold=iou_threshold
+            )
             write_result(
                 db,
                 eval_id,
@@ -485,7 +517,9 @@ def evaluate_task(payload: dict) -> dict:
             samples = []
             for i, asset in enumerate(assets):
                 anns = list(
-                    db.scalars(select(Annotation).where(Annotation.asset_id == asset.id)).all()
+                    db.scalars(
+                        select(Annotation).where(Annotation.asset_id == asset.id)
+                    ).all()
                 )
                 gt_cls: str | None = None
                 for a in anns:
@@ -562,7 +596,10 @@ def _load_model(artifact, scratch_dir: Path) -> Any:
     if fmt == "onnx" or str(local).endswith(".onnx"):
         import onnxruntime as ort  # type: ignore
 
-        return ("onnx", ort.InferenceSession(str(local), providers=["CPUExecutionProvider"]))
+        return (
+            "onnx",
+            ort.InferenceSession(str(local), providers=["CPUExecutionProvider"]),
+        )
     # Default: YOLO weights
     from ultralytics import YOLO  # type: ignore
 
@@ -589,7 +626,9 @@ def _predict_detections(model, asset, score_threshold: float) -> list[dict[str, 
                     {
                         "class": names.get(cls_idx, str(cls_idx)),
                         "bbox": (cx - w / 2, cy - h / 2, w, h),
-                        "score": float(box.conf.item()) if hasattr(box, "conf") else 0.0,
+                        "score": (
+                            float(box.conf.item()) if hasattr(box, "conf") else 0.0
+                        ),
                     }
                 )
         return out

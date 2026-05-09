@@ -83,23 +83,46 @@ def import_archive(
             return _import_coco(db, dataset, version, archive_dir, image_uri_base)
         if fmt == "yolo":
             return _import_yolo(db, dataset, version, archive_dir, image_uri_base)
-        return _import_via_datumaro(db, dataset, version, archive_dir, fmt, image_uri_base)
+        return _import_via_datumaro(
+            db, dataset, version, archive_dir, fmt, image_uri_base
+        )
 
 
 def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
-    """Extract a zip after rejecting any entry that would escape `dest`.
+    """Extract a zip safely.
 
-    Defends against Zip Slip: entries with absolute paths or `..` components
-    that resolve outside the destination directory raise DatumaroError.
+    For each member: validate that the resolved target stays under `dest`,
+    skip directory entries (we mkdir as needed), and refuse symlinks
+    altogether. We then write each file ourselves rather than calling
+    `zf.extractall`, which avoids any TOCTOU between validation and
+    extraction.
     """
     dest_resolved = dest.resolve()
     for member in zf.infolist():
+        # Refuse symlinks: their target is the link path, not the file content,
+        # and the OS would resolve them at follow time.
+        if (member.external_attr >> 16) & 0o170000 == 0o120000:
+            raise DatumaroError(f"unsafe symlink in archive: {member.filename!r}")
+
+        # Build and verify the target path.
         target = (dest / member.filename).resolve()
         try:
             target.relative_to(dest_resolved)
         except ValueError as exc:
             raise DatumaroError(f"unsafe path in archive: {member.filename!r}") from exc
-    zf.extractall(dest)
+
+        if member.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(member, "r") as src, target.open("wb") as out:
+            # 1 MB chunks
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                out.write(chunk)
 
 
 def _import_coco(
@@ -117,7 +140,9 @@ def _import_coco(
         coco = json.load(f)
 
     cats = coco.get("categories") or []
-    class_id_to_name: dict[int, str] = {c["id"]: c.get("name") or str(c["id"]) for c in cats}
+    class_id_to_name: dict[int, str] = {
+        c["id"]: c.get("name") or str(c["id"]) for c in cats
+    }
     classes = [c.get("name") for c in cats if c.get("name")]
     _persist_classes(db, dataset, classes)
 
@@ -138,7 +163,9 @@ def _import_coco(
             width=width,
             height=height,
             label_status="labeled",
-            meta_data=json.dumps({"filename": file_name, "coco_image_id": img.get("id")}),
+            meta_data=json.dumps(
+                {"filename": file_name, "coco_image_id": img.get("id")}
+            ),
         )
         db.add(asset)
         db.flush()
@@ -161,7 +188,9 @@ def _import_coco(
         elif ann.get("segmentation"):
             seg = ann["segmentation"]
             poly = seg[0] if isinstance(seg, list) and seg else []
-            points = [{"x": poly[i], "y": poly[i + 1]} for i in range(0, len(poly) - 1, 2)]
+            points = [
+                {"x": poly[i], "y": poly[i + 1]} for i in range(0, len(poly) - 1, 2)
+            ]
             geom = {"points": points}
             atype = "polygon"
         else:
@@ -196,7 +225,11 @@ def _import_yolo(
         None,
     )
     if classes_file:
-        classes = [line.strip() for line in classes_file.read_text().splitlines() if line.strip()]
+        classes = [
+            line.strip()
+            for line in classes_file.read_text().splitlines()
+            if line.strip()
+        ]
     else:
         yaml_path = next((p for p in root.rglob("data.yaml")), None)
         if yaml_path:
@@ -205,7 +238,9 @@ def _import_yolo(
                     rest = line.split(":", 1)[1].strip()
                     if rest.startswith("["):
                         rest = rest.strip("[]")
-                        classes = [c.strip().strip("'\"") for c in rest.split(",") if c.strip()]
+                        classes = [
+                            c.strip().strip("'\"") for c in rest.split(",") if c.strip()
+                        ]
     if not classes:
         classes = ["object"]
     _persist_classes(db, dataset, classes)
@@ -260,7 +295,9 @@ def _import_yolo(
             except ValueError:
                 warnings.append(f"bad YOLO line: {line}")
                 continue
-            cls = classes[cls_idx] if 0 <= cls_idx < len(classes) else f"class_{cls_idx}"
+            cls = (
+                classes[cls_idx] if 0 <= cls_idx < len(classes) else f"class_{cls_idx}"
+            )
             x = (cx - bw / 2) * (w or 1)
             y = (cy - bh / 2) * (h or 1)
             ww = bw * (w or 1)
@@ -292,7 +329,9 @@ def _import_via_datumaro(
     try:
         import datumaro as dm  # type: ignore
     except Exception as exc:
-        raise DatumaroError(f"format '{fmt}' requires the optional 'datumaro' package") from exc
+        raise DatumaroError(
+            f"format '{fmt}' requires the optional 'datumaro' package"
+        ) from exc
 
     project = dm.Dataset.import_from(str(root), fmt)
     classes = [c for c in project.categories().get("label", dm.LabelCategories()).items]
@@ -326,7 +365,10 @@ def _import_via_datumaro(
             geom: dict[str, Any] | None = None
             atype: str | None = None
             cls = (
-                project.categories().get("label", dm.LabelCategories()).items[a.label].name
+                project.categories()
+                .get("label", dm.LabelCategories())
+                .items[a.label]
+                .name
                 if hasattr(a, "label") and a.label is not None
                 else "object"
             )
@@ -335,7 +377,9 @@ def _import_via_datumaro(
                 atype = "box"
             elif a.type == dm.AnnotationType.polygon:
                 pts = a.points
-                points = [{"x": pts[i], "y": pts[i + 1]} for i in range(0, len(pts) - 1, 2)]
+                points = [
+                    {"x": pts[i], "y": pts[i + 1]} for i in range(0, len(pts) - 1, 2)
+                ]
                 geom = {"points": points}
                 atype = "polygon"
             elif a.type == dm.AnnotationType.label:
@@ -395,6 +439,15 @@ def export_archive(
             )
         elif fmt == "yolo":
             zf.writestr("classes.txt", "\n".join(classes))
+            # Mapping from asset.id → exported label filename. We'd love to use
+            # the original filename stem (so a YOLO consumer can match
+            # `images/foo.jpg` ↔ `labels/foo.txt`), but two assets can share
+            # the same stem (e.g. `train/img_0001.jpg` and `val/img_0001.jpg`).
+            # We disambiguate by suffixing a short slice of the asset id when a
+            # collision is detected. A `manifest.csv` records the mapping so
+            # downstream consumers can reconstruct the original layout.
+            used_stems: dict[str, str] = {}  # stem → asset_id
+            manifest_rows: list[str] = ["asset_id,uri,label_file"]
             for asset, anns in _iter_assets_with_annotations(db, version):
                 w = asset.width or 1
                 h = asset.height or 1
@@ -410,10 +463,19 @@ def export_archive(
                     cy = (g.get("y", 0) + g.get("h", 0) / 2) / h
                     bw = g.get("w", 0) / w
                     bh = g.get("h", 0) / h
-                    cls_idx = classes.index(a.class_name) if a.class_name in classes else 0
+                    cls_idx = (
+                        classes.index(a.class_name) if a.class_name in classes else 0
+                    )
                     lines.append(f"{cls_idx} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
-                stem = Path(asset.uri).stem
-                zf.writestr(f"labels/{stem}.txt", "\n".join(lines))
+                base_stem = Path(asset.uri).stem or asset.id
+                stem = base_stem
+                if stem in used_stems and used_stems[stem] != asset.id:
+                    stem = f"{base_stem}__{asset.id[:8]}"
+                used_stems[stem] = asset.id
+                label_file = f"labels/{stem}.txt"
+                zf.writestr(label_file, "\n".join(lines))
+                manifest_rows.append(f"{asset.id},{asset.uri},{label_file}")
+            zf.writestr("manifest.csv", "\n".join(manifest_rows))
         else:
             # Fall back to Datumaro for non-trivial formats
             try:
@@ -472,7 +534,12 @@ def _build_coco(
                         "id": ann_id,
                         "image_id": img_id,
                         "category_id": cls_to_id.get(a.class_name or "", 1),
-                        "bbox": [g.get("x", 0), g.get("y", 0), g.get("w", 0), g.get("h", 0)],
+                        "bbox": [
+                            g.get("x", 0),
+                            g.get("y", 0),
+                            g.get("w", 0),
+                            g.get("h", 0),
+                        ],
                         "area": g.get("w", 0) * g.get("h", 0),
                         "iscrowd": 0,
                     }
@@ -519,7 +586,13 @@ def _build_datumaro_dataset(
             label = classes.index(a.class_name) if a.class_name in classes else 0
             if a.type == "box":
                 ann_objs.append(
-                    dm.Bbox(g.get("x", 0), g.get("y", 0), g.get("w", 0), g.get("h", 0), label=label)
+                    dm.Bbox(
+                        g.get("x", 0),
+                        g.get("y", 0),
+                        g.get("w", 0),
+                        g.get("h", 0),
+                        label=label,
+                    )
                 )
             elif a.type == "polygon":
                 pts = []
@@ -532,7 +605,9 @@ def _build_datumaro_dataset(
             dm.DatasetItem(
                 id=Path(asset.uri).stem,
                 annotations=ann_objs,
-                media=dm.Image(path=asset.uri, size=(asset.height or 0, asset.width or 0)),
+                media=dm.Image(
+                    path=asset.uri, size=(asset.height or 0, asset.width or 0)
+                ),
             )
         )
     return dm.Dataset.from_iterable(items, categories={dm.AnnotationType.label: cats})
@@ -584,7 +659,9 @@ def _iter_assets_with_annotations(
 
     assets = list(db.scalars(select(Asset).where(Asset.version_id == version.id)).all())
     for asset in assets:
-        anns = list(db.scalars(select(Annotation).where(Annotation.asset_id == asset.id)).all())
+        anns = list(
+            db.scalars(select(Annotation).where(Annotation.asset_id == asset.id)).all()
+        )
         yield asset, anns
 
 
