@@ -138,6 +138,85 @@ def dataset_stats(
     return get_dataset_stats(db, dataset_id, version_id=version_id)
 
 
+@router.get("/assets/{asset_id}/neighbors")
+def get_asset_neighbors(
+    asset_id: str = Path(...),
+    label_status: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return previous/next asset ids in the same dataset version.
+
+    Ordering is `(created_at, id)` ascending. Uses two indexed range queries
+    plus a count, so it stays O(log n) per call instead of materialising the
+    whole asset list.
+    """
+    from sqlalchemy import and_, asc, desc, func, or_, select
+
+    from app.models.asset import Asset
+
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    base_filters = [Asset.dataset_id == asset.dataset_id]
+    if asset.version_id:
+        base_filters.append(Asset.version_id == asset.version_id)
+    if label_status:
+        base_filters.append(Asset.label_status == label_status)
+
+    # The ordering key is (created_at, id). "before" rows are strictly less
+    # than the cursor, "after" rows are strictly greater.
+    cursor_created = asset.created_at
+    cursor_id = asset.id
+
+    if cursor_created is None:
+        # No created_at to compare; fall back to id-only ordering.
+        before_filter = Asset.id < cursor_id
+        after_filter = Asset.id > cursor_id
+        order_before = (desc(Asset.id),)
+        order_after = (asc(Asset.id),)
+    else:
+        before_filter = or_(
+            Asset.created_at < cursor_created,
+            and_(Asset.created_at == cursor_created, Asset.id < cursor_id),
+        )
+        after_filter = or_(
+            Asset.created_at > cursor_created,
+            and_(Asset.created_at == cursor_created, Asset.id > cursor_id),
+        )
+        order_before = (desc(Asset.created_at), desc(Asset.id))
+        order_after = (asc(Asset.created_at), asc(Asset.id))
+
+    prev_id = db.scalar(
+        select(Asset.id).where(*base_filters, before_filter).order_by(*order_before).limit(1)
+    )
+    next_id = db.scalar(
+        select(Asset.id).where(*base_filters, after_filter).order_by(*order_after).limit(1)
+    )
+    total = (
+        db.scalar(
+            select(func.count()).select_from(select(Asset.id).where(*base_filters).subquery())
+        )
+        or 0
+    )
+    index_before = (
+        db.scalar(
+            select(func.count()).select_from(
+                select(Asset.id).where(*base_filters, before_filter).subquery()
+            )
+        )
+        or 0
+    )
+
+    return {
+        "prev": prev_id,
+        "next": next_id,
+        "index": index_before,
+        "total": total,
+    }
+
+
 @router.post("/ingest/confirm", status_code=201)
 def confirm_asset_upload(
     body: ConfirmUploadRequest,

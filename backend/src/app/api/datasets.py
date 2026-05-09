@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,6 +21,7 @@ from app.db.deps import get_current_user, get_db
 from app.models.dataset import ClassMap, Dataset
 from app.models.dataset_version import DatasetVersion
 from app.models.user import User
+from app.services import datumaro_service
 from app.services.dataset_service import snapshot_version
 from app.services.project_dataset_service import create_dataset as svc_create_dataset
 
@@ -62,6 +73,16 @@ def list_datasets(
             }
         )
     return result
+
+
+# NOTE: register the static `/datasets/formats` route BEFORE the dynamic
+# `/datasets/{dataset_id}` route — otherwise FastAPI matches "formats" as a
+# dataset id and returns 404.
+@router.get("/datasets/formats")
+def list_dataset_formats(
+    current_user: User = Depends(get_current_user),
+):
+    return {"formats": list(datumaro_service.SUPPORTED_FORMATS)}
 
 
 @router.get("/datasets/{dataset_id}")
@@ -170,6 +191,93 @@ def create_snapshot(
         "asset_count": v.asset_count,
         "locked": v.locked,
     }
+
+
+@router.post("/datasets/{dataset_id}/import", status_code=201)
+async def import_dataset(
+    dataset_id: str = Path(...),
+    file: UploadFile = File(...),
+    fmt: str = Form("coco"),
+    version_id: str | None = Form(None),
+    image_uri_base: str = Form(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Import an annotation archive (zip) in COCO/YOLO/Pascal VOC/CVAT/etc.
+
+    If `version_id` is omitted, a fresh draft version is created. The archive
+    must contain images plus annotation files for the chosen format.
+    """
+    d = db.get(Dataset, dataset_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # Resolve target version
+    if version_id:
+        version = db.get(DatasetVersion, version_id)
+        if not version or version.dataset_id != dataset_id:
+            raise HTTPException(status_code=404, detail="Version not found")
+        if version.locked:
+            raise HTTPException(status_code=409, detail="Version is locked")
+    else:
+        latest = db.scalars(
+            select(DatasetVersion)
+            .where(DatasetVersion.dataset_id == dataset_id)
+            .order_by(DatasetVersion.version.desc())
+            .limit(1)
+        ).first()
+        next_v = (latest.version + 1) if latest else 1
+        version = DatasetVersion(dataset_id=dataset_id, version=next_v)
+        db.add(version)
+        db.commit()
+        db.refresh(version)
+
+    archive_bytes = await file.read()
+    if not archive_bytes:
+        raise HTTPException(status_code=400, detail="empty archive")
+
+    try:
+        summary = datumaro_service.import_archive(
+            db,
+            dataset_id=dataset_id,
+            version_id=version.id,
+            archive_bytes=archive_bytes,
+            fmt=fmt,
+            image_uri_base=image_uri_base,
+        )
+    except datumaro_service.DatumaroError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "dataset_id": dataset_id,
+        "version_id": version.id,
+        "format": fmt,
+        "asset_count": summary.asset_count,
+        "annotation_count": summary.annotation_count,
+        "classes": summary.classes,
+        "warnings": summary.warnings,
+    }
+
+
+@router.get("/datasets/{dataset_id}/export")
+def export_dataset(
+    dataset_id: str = Path(...),
+    version_id: str = Query(...),
+    fmt: str = Query("coco"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Export a dataset version as a zip archive in the requested format."""
+    try:
+        archive = datumaro_service.export_archive(
+            db, dataset_id=dataset_id, version_id=version_id, fmt=fmt
+        )
+    except datumaro_service.DatumaroError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    headers = {
+        "Content-Disposition": f'attachment; filename="dataset-{dataset_id}-{version_id}-{fmt}.zip"'
+    }
+    return Response(content=archive, media_type="application/zip", headers=headers)
 
 
 @router.put("/datasets/{dataset_id}/classes")

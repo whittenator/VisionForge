@@ -1,5 +1,6 @@
 import os
 import sys
+
 from fastapi.testclient import TestClient
 
 CURRENT_DIR = os.path.dirname(__file__)

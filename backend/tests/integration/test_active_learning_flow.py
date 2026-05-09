@@ -4,6 +4,7 @@ from app.main import app
 
 client = TestClient(app)
 
+
 def test_active_learning_flow_minimal():
     # Create project & dataset
     r = client.post("/api/projects", json={"name": "AL", "description": "flow"})

@@ -21,5 +21,7 @@ class ALItem(Base):
     priority: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     proposed_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
-    resolved_by: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
     resolved_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)

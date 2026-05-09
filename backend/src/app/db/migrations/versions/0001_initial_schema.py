@@ -1,13 +1,12 @@
 """Initial schema with all models
 
 Revision ID: 0001_initial_schema
-Revises: 
+Revises:
 Create Date: 2025-09-23
 """
 
 from alembic import op
 import sqlalchemy as sa
-
 
 # revision identifiers, used by Alembic.
 revision = "0001_initial_schema"
@@ -44,7 +43,9 @@ def upgrade() -> None:
     op.create_table(
         "projects",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("workspace_id", sa.String(length=36), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column(
+            "workspace_id", sa.String(length=36), sa.ForeignKey("workspaces.id"), nullable=False
+        ),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("slug", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text, nullable=True),
@@ -70,7 +71,9 @@ def upgrade() -> None:
         sa.Column("project_id", sa.String(length=36), sa.ForeignKey("projects.id"), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text, nullable=True),
-        sa.Column("class_map_id", sa.String(length=36), sa.ForeignKey("class_maps.id"), nullable=True),
+        sa.Column(
+            "class_map_id", sa.String(length=36), sa.ForeignKey("class_maps.id"), nullable=True
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
 
@@ -107,7 +110,9 @@ def upgrade() -> None:
         "memberships",
         sa.Column("id", sa.String(length=36), primary_key=True),
         sa.Column("user_id", sa.String(length=36), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("workspace_id", sa.String(length=36), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column(
+            "workspace_id", sa.String(length=36), sa.ForeignKey("workspaces.id"), nullable=False
+        ),
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("invited_by", sa.String(length=36), sa.ForeignKey("users.id"), nullable=True),
         sa.Column("invited_at", sa.DateTime(timezone=True), nullable=True),
@@ -185,7 +190,9 @@ def upgrade() -> None:
     op.create_table(
         "invitations",
         sa.Column("id", sa.String(length=36), primary_key=True),
-        sa.Column("workspace_id", sa.String(length=36), sa.ForeignKey("workspaces.id"), nullable=False),
+        sa.Column(
+            "workspace_id", sa.String(length=36), sa.ForeignKey("workspaces.id"), nullable=False
+        ),
         sa.Column("email", sa.String(length=320), nullable=False),
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("token", sa.String(length=255), nullable=False),
@@ -236,7 +243,12 @@ def upgrade() -> None:
         "al_runs",
         sa.Column("id", sa.String(length=36), primary_key=True),
         sa.Column("project_id", sa.String(length=36), sa.ForeignKey("projects.id"), nullable=False),
-        sa.Column("dataset_version_id", sa.String(length=36), sa.ForeignKey("dataset_versions.id"), nullable=False),
+        sa.Column(
+            "dataset_version_id",
+            sa.String(length=36),
+            sa.ForeignKey("dataset_versions.id"),
+            nullable=False,
+        ),
         sa.Column("strategy", sa.String(length=64), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("config_json", sa.Text, nullable=True),

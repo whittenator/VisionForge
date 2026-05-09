@@ -119,10 +119,22 @@ export default function ArtifactsIndex() {
               </div>
 
               {/* Actions */}
-              <div className="mt-auto pt-2 border-t border-[var(--hud-border-subtle)] flex gap-2">
+              <div className="mt-auto pt-2 border-t border-[var(--hud-border-subtle)] flex gap-2 flex-wrap">
+                <Link
+                  to={`/artifacts/predict/${a.id}`}
+                  className="text-[0.6875rem] font-mono text-[oklch(0.10_0.008_240)] bg-[var(--hud-accent)] border border-[var(--hud-accent)] px-2 py-0.5 hover:bg-[var(--hud-accent-hover)] transition-colors"
+                >
+                  PREDICT
+                </Link>
+                <Link
+                  to={`/evaluations/new?artifact_id=${a.id}`}
+                  className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)] border border-[var(--hud-border-default)] px-2 py-0.5 hover:text-[var(--hud-accent)] hover:border-[var(--hud-accent)] transition-colors"
+                >
+                  EVALUATE
+                </Link>
                 <Link
                   to={`/artifacts/export/${a.id}`}
-                  className="text-[0.6875rem] font-mono text-[oklch(0.10_0.008_240)] bg-[var(--hud-accent)] border border-[var(--hud-accent)] px-2 py-0.5 hover:bg-[var(--hud-accent-hover)] transition-colors"
+                  className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)] border border-[var(--hud-border-default)] px-2 py-0.5 hover:text-[var(--hud-accent)] hover:border-[var(--hud-accent)] transition-colors"
                 >
                   EXPORT ONNX
                 </Link>

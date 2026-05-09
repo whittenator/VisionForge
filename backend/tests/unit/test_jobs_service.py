@@ -19,7 +19,9 @@ def test_create_and_update_job(tmp_path):
 
     # SQLite DB for unit test
     db_path = tmp_path / "jobs.db"
-    engine = create_engine(f"sqlite+pysqlite:///{db_path}", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        f"sqlite+pysqlite:///{db_path}", connect_args={"check_same_thread": False}
+    )
     Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     db = Session()
@@ -37,7 +39,9 @@ def test_create_and_update_job(tmp_path):
         assert job2.status == "running"
         assert job2.progress == 0.5
 
-        job3 = update_job_status(db, job.id, status="succeeded", progress=1.0, logs_uri="s3://bucket/logs.txt")
+        job3 = update_job_status(
+            db, job.id, status="succeeded", progress=1.0, logs_uri="s3://bucket/logs.txt"
+        )
         assert job3.status == "succeeded"
         assert job3.progress == 1.0
         assert job3.logs_uri is not None

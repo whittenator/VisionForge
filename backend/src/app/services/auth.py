@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -101,6 +101,18 @@ def get_current_user_from_token(token: str, db: Session) -> User:
     return user
 
 
+def admin_reset_password(db: Session, user_id: str, new_password: str) -> User | None:
+    """Admin-only password reset. Issues a fresh bcrypt hash."""
+    user = db.scalar(select(User).where(User.id == user_id))
+    if not user:
+        return None
+    user.password_hash = _hash_password(new_password)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def register(db: Session, *, name: str, email: str, password: str) -> User:
     existing = db.scalar(select(User).where(User.email == email))
     if existing:
@@ -112,28 +124,18 @@ def register(db: Session, *, name: str, email: str, password: str) -> User:
     return u
 
 
-def authenticate(email: str, password: str) -> Optional[tuple[str, str, AuthUser]]:
+def authenticate(email: str, password: str) -> tuple[str, str, AuthUser] | None:
     with SessionLocal() as db:
         user = db.scalar(select(User).where(User.email == email))
         if not user or not user.password_hash:
             return None
 
-        # Support legacy SHA256 hashes during migration: verify by comparison,
-        # then re-hash with bcrypt on successful login.
-        if _is_bcrypt_hash(user.password_hash):
-            if not _verify_password(password, user.password_hash):
-                return None
-        else:
-            # Legacy SHA256 path
-            import hashlib
-
-            legacy_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-            if user.password_hash != legacy_hash:
-                return None
-            # Upgrade to bcrypt in-place
-            user.password_hash = _hash_password(password)
-            db.add(user)
-            db.commit()
+        # Bcrypt-only. Legacy SHA256 hashes are rejected and the user must
+        # complete a password reset (via the password reset flow / admin tool).
+        if not _is_bcrypt_hash(user.password_hash):
+            return None
+        if not _verify_password(password, user.password_hash):
+            return None
 
         auth_user: AuthUser = {
             "id": user.id,

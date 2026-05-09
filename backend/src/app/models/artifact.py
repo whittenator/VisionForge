@@ -17,7 +17,9 @@ class ModelArtifact(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False)
-    run_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("experiment_runs.id"), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("experiment_runs.id"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     version: Mapped[str] = mapped_column(String(32), nullable=False, default="1")
     type: Mapped[str] = mapped_column(String(50), nullable=False)  # pytorch, onnx

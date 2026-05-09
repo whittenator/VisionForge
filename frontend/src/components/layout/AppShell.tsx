@@ -7,6 +7,7 @@ const NAV_LINKS = [
   { to: '/datasets',         label: 'DATASETS'    },
   { to: '/experiments',      label: 'EXPERIMENTS' },
   { to: '/artifacts',        label: 'ARTIFACTS'   },
+  { to: '/evaluations',      label: 'EVALUATIONS' },
   { to: '/active-learning',  label: 'ACTIVE LEARN'},
   { to: '/clusters',         label: 'CLUSTERS'    },
   { to: '/admin/users',      label: 'ADMIN'       },

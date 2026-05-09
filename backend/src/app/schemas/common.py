@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel
 class UploadUrlRequest(BaseModel):
     datasetVersionId: str
     filename: str
-    contentType: Optional[str] = None
+    contentType: str | None = None
 
 
 class UploadUrlResponse(BaseModel):
@@ -22,20 +22,31 @@ class TrainRequest(BaseModel):
     baseModel: str = "yolov8n.pt"
     params: dict[str, Any] = {}
     name: str = "Training Run"
-    clusterId: Optional[str] = None
+    clusterId: str | None = None
 
 
 class OnnxExportRequest(BaseModel):
     experimentId: str
-    dynamicAxes: Optional[bool] = True
-    clusterId: Optional[str] = None
+    dynamicAxes: bool | None = True
+    clusterId: str | None = None
 
 
 class Job(BaseModel):
+    """Generic async job response.
+
+    Includes optional linkage fields so callers can wire the job back to the
+    domain object that spawned it (training run / evaluation / cluster) without
+    a second round trip and without `response_model=Job` silently dropping
+    the field.
+    """
+
     id: str
     jobId: str
     type: str
     status: str
     progress: float
-    errorMessage: Optional[str] = None
-    createdAt: Optional[str] = None
+    errorMessage: str | None = None
+    createdAt: str | None = None
+    clusterId: str | None = None
+    experimentId: str | None = None
+    evaluationId: str | None = None
