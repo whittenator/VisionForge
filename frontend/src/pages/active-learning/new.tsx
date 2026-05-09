@@ -10,6 +10,8 @@ import { apiGet, apiPost } from '@/services/api';
 interface Project { id: string; name: string; }
 interface Dataset { id: string; name: string; latest_version_id?: string; }
 
+interface Page<T> { items: T[]; total: number; page: number; page_size: number; }
+
 function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
   return (
     <label htmlFor={htmlFor} className="label-overline block mb-1">
@@ -35,13 +37,17 @@ export default function ActiveLearningNew() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    apiGet<Project[]>('/api/projects').then(setProjects).catch(console.error);
+    apiGet<Page<Project>>('/api/projects?page=1&page_size=200')
+      .then((d) => setProjects(d.items))
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
     if (!form.projectId) { setDatasets([]); return; }
-    apiGet<Dataset[]>(`/api/datasets?project_id=${form.projectId}`)
-      .then(setDatasets)
+    apiGet<Page<Dataset>>(
+      `/api/datasets?project_id=${form.projectId}&page=1&page_size=200`,
+    )
+      .then((d) => setDatasets(d.items))
       .catch(console.error);
   }, [form.projectId]);
 

@@ -4,6 +4,7 @@ import Badge from '@/components/ui/Badge';
 import Spinner from '@/components/ui/Spinner';
 import EmptyState from '@/components/common/EmptyState';
 import ErrorState from '@/components/common/ErrorState';
+import Pager, { PaginatedResponse } from '@/components/common/Pager';
 import { apiGet } from '@/services/api';
 
 interface EvaluationSummary {
@@ -17,6 +18,8 @@ interface EvaluationSummary {
   completed_at: string | null;
 }
 
+const PAGE_SIZE = 25;
+
 function statusBadge(status: string) {
   if (status === 'succeeded') return <Badge variant="success">DONE</Badge>;
   if (status === 'running') return <Badge variant="info">RUNNING</Badge>;
@@ -27,6 +30,8 @@ function statusBadge(status: string) {
 export default function EvaluationsIndex() {
   const [params] = useSearchParams();
   const [rows, setRows] = useState<EvaluationSummary[] | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,11 +42,16 @@ export default function EvaluationsIndex() {
     if (dsv) qp.set('dataset_version_id', dsv);
     const project = params.get('project_id');
     if (project) qp.set('project_id', project);
+    qp.set('page', String(page));
+    qp.set('page_size', String(PAGE_SIZE));
 
-    apiGet<EvaluationSummary[]>(`/api/evaluations?${qp.toString()}`)
-      .then(setRows)
+    apiGet<PaginatedResponse<EvaluationSummary>>(`/api/evaluations?${qp.toString()}`)
+      .then((data) => {
+        setRows(data.items);
+        setTotal(data.total);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'));
-  }, [params]);
+  }, [params, page]);
 
   return (
     <div className="space-y-4">
@@ -78,6 +88,7 @@ export default function EvaluationsIndex() {
       )}
 
       {rows && rows.length > 0 && (
+        <>
         <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
           <table className="w-full text-xs font-mono">
             <thead className="bg-[var(--hud-inset)]">
@@ -122,6 +133,8 @@ export default function EvaluationsIndex() {
             </tbody>
           </table>
         </div>
+        <Pager page={page} pageSize={PAGE_SIZE} total={total} onChange={setPage} />
+        </>
       )}
     </div>
   );

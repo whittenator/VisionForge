@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiGet, apiPost, apiPut, apiDelete, apiUrl } from '@/services/api';
+import { apiGet, apiPost, apiDelete, apiUrl } from '@/services/api';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -318,6 +318,25 @@ export default function AnnotatorPage() {
       try {
         const assetData = await apiGet(`/api/assets/${assetId}`);
         setAsset(assetData);
+
+        // Pre-populate the class sidebar from the dataset's ClassMap so
+        // annotators don't have to re-add classes every session.
+        try {
+          if (assetData.dataset_id) {
+            const dataset = await apiGet(`/api/datasets/${assetData.dataset_id}`);
+            const seeded = Array.isArray(dataset.classes) ? dataset.classes : [];
+            const names = seeded
+              .map((c) => (typeof c === 'string' ? c : c?.name))
+              .filter(Boolean);
+            if (names.length > 0) {
+              setClasses(names);
+              setSelectedClass(names[0]);
+            }
+          }
+        } catch {
+          // Falls back to the default ['object'] class.
+        }
+
         try {
           const annsData = await apiGet(`/api/assets/${assetId}/annotations`);
           const loaded = Array.isArray(annsData) ? annsData : annsData.items ?? [];
@@ -640,40 +659,90 @@ export default function AnnotatorPage() {
     if (!assetId) return;
     setStatus('Saving…');
     try {
-      const saved = [];
-      for (const ann of annotationsRef.current) {
+      const creates = [];
+      const updates = [];
+      const current = annotationsRef.current;
+      current.forEach((ann, idx) => {
         if (ann.isNew || !ann.id) {
-          const result = await apiPost('/api/annotations', {
+          creates.push({
+            client_id: `idx-${idx}`,
             asset_id: assetId,
             type: ann.type,
-            class_name: ann.class_name,
             geometry: ann.geometry,
+            class_name: ann.class_name,
           });
-          saved.push({ ...ann, id: result.id, version: result.version, isNew: false, dirty: false });
         } else if (ann.dirty) {
-          try {
-            const result = await apiPut(`/api/annotations/${ann.id}`, {
-              class_name: ann.class_name,
-              geometry: ann.geometry,
-              expected_version: ann.version,
-            });
-            saved.push({ ...ann, version: result.version, dirty: false });
-          } catch (err) {
-            if (String(err.message).includes('version mismatch')) {
-              setStatus(`Conflict on ${ann.id}: another editor changed it`);
-              saved.push(ann);
-            } else {
-              throw err;
-            }
-          }
-        } else {
-          saved.push(ann);
+          updates.push({
+            id: ann.id,
+            geometry: ann.geometry,
+            class_name: ann.class_name,
+            expected_version: ann.version,
+          });
         }
+      });
+      if (creates.length === 0 && updates.length === 0) {
+        setDirty(false);
+        setStatus('Nothing to save');
+        return;
       }
-      setAnnotations(saved);
-      annotationsRef.current = saved;
-      setDirty(false);
-      setStatus('Saved');
+      const result = await apiPost('/api/annotations/bulk', {
+        creates,
+        updates,
+        deletes: [],
+      });
+
+      const createdById = new Map();
+      (result.created || []).forEach((row) => {
+        if (row.client_id && row.status === 'ok' && row.annotation) {
+          createdById.set(row.client_id, row.annotation);
+        }
+      });
+      const updatedById = new Map();
+      (result.updated || []).forEach((row) => {
+        if (row.id) updatedById.set(row.id, row);
+      });
+
+      const next = current.map((ann, idx) => {
+        if (ann.isNew || !ann.id) {
+          const created = createdById.get(`idx-${idx}`);
+          if (created) {
+            return {
+              ...ann,
+              id: created.id,
+              version: created.version,
+              isNew: false,
+              dirty: false,
+            };
+          }
+          return ann;
+        }
+        if (ann.dirty) {
+          const u = updatedById.get(ann.id);
+          if (!u) return ann;
+          if (u.status === 'ok' && u.annotation) {
+            return { ...ann, version: u.annotation.version, dirty: false };
+          }
+          if (u.status === 'conflict') {
+            setStatus(`Conflict on ${ann.id}: another editor changed it`);
+            return ann;
+          }
+        }
+        return ann;
+      });
+
+      setAnnotations(next);
+      annotationsRef.current = next;
+      const errors = [
+        ...(result.created || []).filter((r) => r.status !== 'ok'),
+        ...(result.updated || []).filter((r) => r.status !== 'ok'),
+      ];
+      if (errors.length === 0) {
+        setDirty(false);
+        setStatus('Saved');
+      } else {
+        setDirty(true);
+        setStatus(`Saved with ${errors.length} issue(s) — see status`);
+      }
     } catch (err) {
       setStatus(`Save failed: ${err.message}`);
     }

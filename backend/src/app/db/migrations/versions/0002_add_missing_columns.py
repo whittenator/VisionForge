@@ -5,8 +5,8 @@ Revises: 0001_initial_schema
 Create Date: 2026-03-15
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0002_add_missing_columns"
 down_revision = "0001_initial_schema"

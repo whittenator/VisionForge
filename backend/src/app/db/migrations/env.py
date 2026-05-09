@@ -20,6 +20,7 @@ if config.config_file_name is not None:
 
 # Add your model's MetaData object here for 'autogenerate' support
 from app.db.base import Base
+
 target_metadata = Base.metadata
 
 # Override URL from environment: prefer DATABASE_URL, else derive from POSTGRES_* vars
@@ -30,6 +31,7 @@ if not database_url:
         f"{os.getenv('POSTGRES_HOST','localhost')}:{os.getenv('POSTGRES_PORT','5432')}/{os.getenv('POSTGRES_DB','visionforge')}"
     )
 config.set_main_option("sqlalchemy.url", database_url)
+
 
 def run_migrations_offline():
     url = config.get_main_option("sqlalchemy.url")

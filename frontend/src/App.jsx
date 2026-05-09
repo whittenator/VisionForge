@@ -14,11 +14,13 @@ import DatasetVersion from "./pages/datasets/version";
 import DatasetsIndex from "./pages/datasets/index";
 import DatasetDetail from "./pages/datasets/[datasetId]/index";
 import DatasetAnnotateGateway from "./pages/datasets/[datasetId]/annotate";
+import DatasetReviewQueue from "./pages/datasets/[datasetId]/review";
 import ExperimentsIndex from "./pages/experiments/index";
 import ExperimentsNew from "./pages/experiments/new";
 import ExperimentDetail from "./pages/experiments/[runId]";
 import ArtifactsIndex from "./pages/artifacts/index";
 import ArtifactsExport from "./pages/artifacts/export";
+import ArtifactsLineage from "./pages/artifacts/lineage";
 import ActiveLearningIndex from "./pages/active-learning/index";
 import ActiveLearningNew from "./pages/active-learning/new";
 import ALRunDetail from "./pages/active-learning/[alRunId]";
@@ -51,34 +53,97 @@ function StatReadout({ label, value, loading, href }) {
   );
 }
 
+function StatusRow({ label, component }) {
+  const status = component?.status || "unknown";
+  const cls =
+    status === "ok"
+      ? "text-[var(--hud-success-text)]"
+      : status === "degraded"
+      ? "text-[var(--hud-warning-text,oklch(0.78_0.18_85))]"
+      : "text-[var(--hud-danger-text)]";
+  const dot = status === "ok" ? "●" : status === "degraded" ? "◐" : "○";
+  const labelOut = status === "ok" ? "ONLINE" : status.toUpperCase();
+  return (
+    <div
+      className="flex items-center justify-between gap-4"
+      title={component?.detail || status}
+    >
+      <span className="text-[var(--hud-text-muted)]">{label}</span>
+      <span className={cls}>
+        {dot} {labelOut}
+      </span>
+    </div>
+  );
+}
+
+function SystemStatusPanel({ system }) {
+  const components = system?.components || {};
+  return (
+    <div className="border border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-4 py-3 min-w-[160px]">
+      <div className="label-overline mb-2">System Status</div>
+      <div className="space-y-1.5 text-xs font-mono">
+        <StatusRow label="API"      component={components.api}      />
+        <StatusRow label="DATABASE" component={components.database} />
+        <StatusRow label="QUEUE"    component={components.queue}    />
+        <StatusRow label="STORAGE"  component={components.storage}  />
+      </div>
+    </div>
+  );
+}
+
 function HomeDashboard() {
   const [stats, setStats] = useState({ projects: null, datasets: null, models: null });
   const [statsLoading, setStatsLoading] = useState(true);
+  const [system, setSystem] = useState(null);
 
   useEffect(() => {
+    let cancelled = false;
     Promise.all([
-      apiGet("/api/projects"),
-      apiGet("/api/datasets"),
-      apiGet("/api/artifacts/models"),
+      apiGet("/api/projects?page=1&page_size=1"),
+      apiGet("/api/datasets?page=1&page_size=1"),
+      apiGet("/api/artifacts/models?page=1&page_size=1"),
     ])
       .then(([projects, datasets, models]) => {
+        if (cancelled) return;
+        const total = (resp) =>
+          typeof resp?.total === "number"
+            ? resp.total
+            : Array.isArray(resp)
+            ? resp.length
+            : 0;
         setStats({
-          projects: Array.isArray(projects) ? projects.length : 0,
-          datasets: Array.isArray(datasets) ? datasets.length : 0,
-          models: Array.isArray(models) ? models.length : 0,
+          projects: total(projects),
+          datasets: total(datasets),
+          models: total(models),
         });
       })
       .catch(console.error)
-      .finally(() => setStatsLoading(false));
+      .finally(() => !cancelled && setStatsLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer;
+    const tick = () => {
+      apiGet("/api/system/status")
+        .then((data) => !cancelled && setSystem(data))
+        .catch(() => !cancelled && setSystem({ status: "down", components: {} }));
+    };
+    tick();
+    timer = setInterval(tick, 15000);
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
   }, []);
 
   return (
     <div className="space-y-6">
-      {/* Hero section */}
       <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-6">
-        {/* Top label */}
         <div className="label-overline mb-3">// VisionForge · Computer Vision Platform</div>
-
         <div className="grid gap-6 md:grid-cols-[1fr_auto] items-center">
           <div className="space-y-3">
             <h1 className="text-xl font-semibold tracking-tight text-[var(--hud-text-primary)]">
@@ -102,48 +167,28 @@ function HomeDashboard() {
               </Link>
             </div>
           </div>
-
-          {/* System status panel */}
-          <div className="border border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-4 py-3 min-w-[160px]">
-            <div className="label-overline mb-2">System Status</div>
-            <div className="space-y-1.5 text-xs font-mono">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-[var(--hud-text-muted)]">API</span>
-                <span className="text-[var(--hud-success-text)]">● ONLINE</span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-[var(--hud-text-muted)]">QUEUE</span>
-                <span className="text-[var(--hud-success-text)]">● ONLINE</span>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-[var(--hud-text-muted)]">STORAGE</span>
-                <span className="text-[var(--hud-success-text)]">● ONLINE</span>
-              </div>
-            </div>
-          </div>
+          <SystemStatusPanel system={system} />
         </div>
       </div>
 
-      {/* Stats row */}
       <div>
         <div className="label-overline mb-2">Platform Overview</div>
         <div className="grid grid-cols-3 gap-px bg-[var(--hud-border-default)]">
-          <StatReadout label="Projects"  value={stats.projects} loading={statsLoading} href="/projects"    />
-          <StatReadout label="Datasets"  value={stats.datasets} loading={statsLoading} href="/datasets"    />
-          <StatReadout label="Models"    value={stats.models}   loading={statsLoading} href="/artifacts"   />
+          <StatReadout label="Projects" value={stats.projects} loading={statsLoading} href="/projects"  />
+          <StatReadout label="Datasets" value={stats.datasets} loading={statsLoading} href="/datasets"  />
+          <StatReadout label="Models"   value={stats.models}   loading={statsLoading} href="/artifacts" />
         </div>
       </div>
 
-      {/* Quick nav grid */}
       <div>
         <div className="label-overline mb-2">Quick Access</div>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-[var(--hud-border-default)]">
           {[
-            { to: '/projects',        label: 'PROJECTS',       desc: 'Manage project workspaces'            },
-            { to: '/datasets',        label: 'DATASETS',       desc: 'Browse and upload datasets'           },
-            { to: '/experiments',     label: 'EXPERIMENTS',    desc: 'Training runs and metrics'            },
-            { to: '/artifacts',       label: 'ARTIFACTS',      desc: 'Model exports and lineage'            },
-            { to: '/active-learning', label: 'ACTIVE LEARN',   desc: 'Select informative samples to label'  },
+            { to: "/projects",        label: "PROJECTS",     desc: "Manage project workspaces"           },
+            { to: "/datasets",        label: "DATASETS",     desc: "Browse and upload datasets"          },
+            { to: "/experiments",     label: "EXPERIMENTS",  desc: "Training runs and metrics"           },
+            { to: "/artifacts",       label: "ARTIFACTS",    desc: "Model exports and lineage"           },
+            { to: "/active-learning", label: "ACTIVE LEARN", desc: "Select informative samples to label" },
           ].map(({ to, label, desc }) => (
             <Link
               key={to}
@@ -187,6 +232,7 @@ export default function App() {
             <Route path="/datasets/version" element={<ProtectedRoute><DatasetVersion /></ProtectedRoute>} />
             <Route path="/datasets/:datasetId" element={<ProtectedRoute><DatasetDetail /></ProtectedRoute>} />
             <Route path="/datasets/:datasetId/annotate" element={<ProtectedRoute><DatasetAnnotateGateway /></ProtectedRoute>} />
+            <Route path="/datasets/:datasetId/review" element={<ProtectedRoute><DatasetReviewQueue /></ProtectedRoute>} />
             {/* Experiments */}
             <Route path="/experiments" element={<ProtectedRoute><ExperimentsIndex /></ProtectedRoute>} />
             <Route path="/experiments/new" element={<ProtectedRoute><ExperimentsNew /></ProtectedRoute>} />
@@ -194,6 +240,7 @@ export default function App() {
             {/* Artifacts */}
             <Route path="/artifacts" element={<ProtectedRoute><ArtifactsIndex /></ProtectedRoute>} />
             <Route path="/artifacts/export/:modelId" element={<ProtectedRoute><ArtifactsExport /></ProtectedRoute>} />
+            <Route path="/artifacts/lineage/:modelId" element={<ProtectedRoute><ArtifactsLineage /></ProtectedRoute>} />
             {/* Active Learning */}
             <Route path="/active-learning" element={<ProtectedRoute><ActiveLearningIndex /></ProtectedRoute>} />
             <Route path="/active-learning/new" element={<ProtectedRoute><ActiveLearningNew /></ProtectedRoute>} />

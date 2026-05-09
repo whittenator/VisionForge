@@ -22,6 +22,7 @@ def _db_url() -> str:
     db = os.getenv("POSTGRES_DB", "visionforge")
     return f"postgresql+psycopg2://{user}:{pwd}@{host}:{port}/{db}"
 
+
 url = _db_url()
 connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
 engine = create_engine(url, pool_pre_ping=True, future=True, connect_args=connect_args)

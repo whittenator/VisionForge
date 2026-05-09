@@ -33,18 +33,21 @@ from app.services.auth import ensure_superuser
 # Import new routers (created by the new API implementation)
 try:
     from app.api.annotations import router as annotations_router
+
     _has_annotations = True
 except ImportError:
     _has_annotations = False
 
 try:
     from app.api.assets import router as assets_router
+
     _has_assets = True
 except ImportError:
     _has_assets = False
 
 try:
     from app.api.workspaces import router as workspaces_router
+
     _has_workspaces = True
 except ImportError:
     _has_workspaces = False

@@ -1,6 +1,3 @@
-from typing import List
-
-
 class NotificationService:
     def __init__(self):
         self.notifications = []
@@ -11,7 +8,7 @@ class NotificationService:
             {"user_id": user_id, "type": type, "title": title, "body": body, "read": False}
         )
 
-    def get_notifications(self, user_id: str) -> List[dict]:
+    def get_notifications(self, user_id: str) -> list[dict]:
         return [n for n in self.notifications if n["user_id"] == user_id]
 
 

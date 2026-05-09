@@ -10,9 +10,11 @@ from pathlib import Path
 try:
     from celery import shared_task  # type: ignore
 except Exception:  # pragma: no cover - fallback when Celery not installed
+
     def shared_task(*args, **kwargs):
         def _wrap(fn):
             return fn
+
         return _wrap
 
 
@@ -30,6 +32,8 @@ def _make_session():
 def export_task(payload: dict) -> dict:
     job_id = payload.get("jobId")
     experiment_id = payload.get("experimentId")
+    dynamic_axes = payload.get("dynamicAxes")
+    opset = payload.get("opset")
     db = _make_session()
     result: dict = {}
 
@@ -102,7 +106,14 @@ def export_task(payload: dict) -> dict:
 
                 if pt_path.exists() and pt_path.stat().st_size > 0:
                     model = YOLO(str(pt_path))
-                    export_result = model.export(format="onnx", dynamic=True, simplify=True)
+                    export_kwargs: dict = {"format": "onnx", "simplify": True}
+                    if dynamic_axes is not None:
+                        export_kwargs["dynamic"] = bool(dynamic_axes)
+                    else:
+                        export_kwargs["dynamic"] = True
+                    if opset is not None:
+                        export_kwargs["opset"] = int(opset)
+                    export_result = model.export(**export_kwargs)
                     # export() returns the path to the exported file
                     if export_result:
                         onnx_path = Path(str(export_result))
@@ -148,7 +159,9 @@ def export_task(payload: dict) -> dict:
                 try:
                     import io
 
-                    minio_client.put_object(bucket, onnx_key, io.BytesIO(onnx_bytes), len(onnx_bytes))
+                    minio_client.put_object(
+                        bucket, onnx_key, io.BytesIO(onnx_bytes), len(onnx_bytes)
+                    )
                 except Exception as ul_err:
                     raise RuntimeError(f"Failed to upload ONNX model: {ul_err}") from ul_err
 
@@ -169,6 +182,9 @@ def export_task(payload: dict) -> dict:
             if existing:
                 existing.checksum = onnx_checksum
                 existing.size_bytes = onnx_size
+                if onnx_key:
+                    existing.storage_path = onnx_key
+                    existing.format = "onnx"
                 db.add(existing)
             else:
                 artifact = ModelArtifact(
@@ -177,6 +193,8 @@ def export_task(payload: dict) -> dict:
                     run_id=run.id,
                     version=1,
                     type="onnx",
+                    format="onnx",
+                    storage_path=onnx_key,
                     checksum=onnx_checksum,
                     size_bytes=onnx_size,
                 )
@@ -186,9 +204,7 @@ def export_task(payload: dict) -> dict:
 
                 # Update run.artifacts
                 artifacts_data_out: list[dict] = json.loads(run.artifacts or "[]")
-                artifacts_data_out.append(
-                    {"id": artifact.id, "type": "onnx", "key": onnx_key}
-                )
+                artifacts_data_out.append({"id": artifact.id, "type": "onnx", "key": onnx_key})
                 run.artifacts = json.dumps(artifacts_data_out)
                 db.add(run)
 
@@ -210,6 +226,7 @@ def export_task(payload: dict) -> dict:
         try:
             if job_id:
                 from app.services.jobs_service import update_job_status
+
                 update_job_status(db, job_id, status="failed", progress=0.0)
         except Exception:
             pass

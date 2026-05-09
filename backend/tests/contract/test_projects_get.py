@@ -13,9 +13,13 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_list_projects_contract_returns_array():
+def test_list_projects_contract_returns_paginated_envelope():
     r = client.get("/api/projects")
     assert r.status_code in (200, 204)
     if r.status_code == 200:
         data = r.json()
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert "items" in data and isinstance(data["items"], list)
+        assert "total" in data
+        assert "page" in data
+        assert "page_size" in data

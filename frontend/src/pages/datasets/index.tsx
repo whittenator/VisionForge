@@ -4,6 +4,7 @@ import Badge from '@/components/ui/Badge';
 import Loading from '@/components/common/Loading';
 import EmptyState from '@/components/common/EmptyState';
 import ErrorState from '@/components/common/ErrorState';
+import Pager, { PaginatedResponse } from '@/components/common/Pager';
 import { apiGet } from '@/services/api';
 
 interface Dataset {
@@ -14,24 +15,37 @@ interface Dataset {
   latest_version_id?: string;
   project_id?: string;
   project_name?: string;
+  task_type?: 'detect' | 'classify' | null;
   created_at: string;
 }
+
+const PAGE_SIZE = 24;
 
 export default function DatasetsIndex() {
   const [searchParams] = useSearchParams();
   const projectId = searchParams.get('projectId') || '';
 
   const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const url = projectId ? `/api/datasets?project_id=${projectId}` : '/api/datasets';
-    apiGet<Dataset[]>(url)
-      .then(setDatasets)
+    setLoading(true);
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: String(PAGE_SIZE),
+    });
+    if (projectId) params.set('project_id', projectId);
+    apiGet<PaginatedResponse<Dataset>>(`/api/datasets?${params.toString()}`)
+      .then((data) => {
+        setDatasets(data.items);
+        setTotal(data.total);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load datasets'))
       .finally(() => setLoading(false));
-  }, [projectId]);
+  }, [projectId, page]);
 
   if (loading) return <div className="py-6"><Loading label="Loading datasets…" /></div>;
   if (error) return <ErrorState title="Failed to load datasets" description={error} />;
@@ -87,6 +101,7 @@ export default function DatasetsIndex() {
           </Link>
         </EmptyState>
       ) : (
+      <>
         <div className="grid grid-cols-1 gap-px sm:grid-cols-2 lg:grid-cols-3 bg-[var(--hud-border-default)]">
           {datasets.map((ds) => (
             <div key={ds.id} className="bg-[var(--hud-surface)] p-4 flex flex-col gap-2 hover:bg-[var(--hud-elevated)] transition-colors">
@@ -98,9 +113,16 @@ export default function DatasetsIndex() {
                 >
                   {ds.name}
                 </Link>
-                {ds.latest_version != null && (
-                  <Badge variant="default">v{ds.latest_version}</Badge>
-                )}
+                <div className="flex items-center gap-1">
+                  {ds.task_type && (
+                    <span className="text-[0.625rem] font-mono text-[var(--hud-accent)] border border-[var(--hud-border-default)] px-1.5 py-0.5 tracking-widest uppercase">
+                      {ds.task_type}
+                    </span>
+                  )}
+                  {ds.latest_version != null && (
+                    <Badge variant="default">v{ds.latest_version}</Badge>
+                  )}
+                </div>
               </div>
 
               {/* Metadata */}
@@ -145,10 +167,18 @@ export default function DatasetsIndex() {
                     ANNOTATE
                   </Link>
                 )}
+                <Link
+                  to={`/datasets/${ds.id}/review`}
+                  className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)] border border-[var(--hud-border-default)] px-2 py-0.5 hover:border-[var(--hud-accent)] transition-colors"
+                >
+                  REVIEW
+                </Link>
               </div>
             </div>
           ))}
         </div>
+        <Pager page={page} pageSize={PAGE_SIZE} total={total} onChange={setPage} />
+      </>
       )}
     </div>
   );

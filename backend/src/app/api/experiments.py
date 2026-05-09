@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Path
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
 from app.models.experiment import ExperimentRun as ExperimentModel
 from app.models.user import User
-from app.schemas.experiment import Experiment as ExperimentSchema, ExperimentCreate
+from app.schemas.experiment import Experiment as ExperimentSchema
+from app.schemas.experiment import ExperimentCreate
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 
@@ -30,13 +31,30 @@ def _run_to_schema(e: ExperimentModel) -> ExperimentSchema:
     )
 
 
-@router.get("/runs", response_model=list[ExperimentSchema] | None)
+@router.get("/runs")
 def list_runs(
+    project_id: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    rows = db.scalars(select(ExperimentModel)).all()
-    return [_run_to_schema(e) for e in rows]
+    base = select(ExperimentModel)
+    if project_id:
+        base = base.where(ExperimentModel.project_id == project_id)
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    offset = (page - 1) * page_size
+    rows = list(
+        db.scalars(
+            base.order_by(ExperimentModel.created_at.desc()).offset(offset).limit(page_size)
+        ).all()
+    )
+    return {
+        "items": [_run_to_schema(e).model_dump() for e in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.get("/runs/{runId}", response_model=ExperimentSchema)

@@ -83,9 +83,7 @@ def import_archive(
             return _import_coco(db, dataset, version, archive_dir, image_uri_base)
         if fmt == "yolo":
             return _import_yolo(db, dataset, version, archive_dir, image_uri_base)
-        return _import_via_datumaro(
-            db, dataset, version, archive_dir, fmt, image_uri_base
-        )
+        return _import_via_datumaro(db, dataset, version, archive_dir, fmt, image_uri_base)
 
 
 def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
@@ -140,9 +138,7 @@ def _import_coco(
         coco = json.load(f)
 
     cats = coco.get("categories") or []
-    class_id_to_name: dict[int, str] = {
-        c["id"]: c.get("name") or str(c["id"]) for c in cats
-    }
+    class_id_to_name: dict[int, str] = {c["id"]: c.get("name") or str(c["id"]) for c in cats}
     classes = [c.get("name") for c in cats if c.get("name")]
     _persist_classes(db, dataset, classes)
 
@@ -163,9 +159,7 @@ def _import_coco(
             width=width,
             height=height,
             label_status="labeled",
-            meta_data=json.dumps(
-                {"filename": file_name, "coco_image_id": img.get("id")}
-            ),
+            meta_data=json.dumps({"filename": file_name, "coco_image_id": img.get("id")}),
         )
         db.add(asset)
         db.flush()
@@ -188,9 +182,7 @@ def _import_coco(
         elif ann.get("segmentation"):
             seg = ann["segmentation"]
             poly = seg[0] if isinstance(seg, list) and seg else []
-            points = [
-                {"x": poly[i], "y": poly[i + 1]} for i in range(0, len(poly) - 1, 2)
-            ]
+            points = [{"x": poly[i], "y": poly[i + 1]} for i in range(0, len(poly) - 1, 2)]
             geom = {"points": points}
             atype = "polygon"
         else:
@@ -225,11 +217,7 @@ def _import_yolo(
         None,
     )
     if classes_file:
-        classes = [
-            line.strip()
-            for line in classes_file.read_text().splitlines()
-            if line.strip()
-        ]
+        classes = [line.strip() for line in classes_file.read_text().splitlines() if line.strip()]
     else:
         yaml_path = next((p for p in root.rglob("data.yaml")), None)
         if yaml_path:
@@ -238,9 +226,7 @@ def _import_yolo(
                     rest = line.split(":", 1)[1].strip()
                     if rest.startswith("["):
                         rest = rest.strip("[]")
-                        classes = [
-                            c.strip().strip("'\"") for c in rest.split(",") if c.strip()
-                        ]
+                        classes = [c.strip().strip("'\"") for c in rest.split(",") if c.strip()]
     if not classes:
         classes = ["object"]
     _persist_classes(db, dataset, classes)
@@ -295,9 +281,7 @@ def _import_yolo(
             except ValueError:
                 warnings.append(f"bad YOLO line: {line}")
                 continue
-            cls = (
-                classes[cls_idx] if 0 <= cls_idx < len(classes) else f"class_{cls_idx}"
-            )
+            cls = classes[cls_idx] if 0 <= cls_idx < len(classes) else f"class_{cls_idx}"
             x = (cx - bw / 2) * (w or 1)
             y = (cy - bh / 2) * (h or 1)
             ww = bw * (w or 1)
@@ -329,9 +313,7 @@ def _import_via_datumaro(
     try:
         import datumaro as dm  # type: ignore
     except Exception as exc:
-        raise DatumaroError(
-            f"format '{fmt}' requires the optional 'datumaro' package"
-        ) from exc
+        raise DatumaroError(f"format '{fmt}' requires the optional 'datumaro' package") from exc
 
     project = dm.Dataset.import_from(str(root), fmt)
     classes = [c for c in project.categories().get("label", dm.LabelCategories()).items]
@@ -365,10 +347,7 @@ def _import_via_datumaro(
             geom: dict[str, Any] | None = None
             atype: str | None = None
             cls = (
-                project.categories()
-                .get("label", dm.LabelCategories())
-                .items[a.label]
-                .name
+                project.categories().get("label", dm.LabelCategories()).items[a.label].name
                 if hasattr(a, "label") and a.label is not None
                 else "object"
             )
@@ -377,9 +356,7 @@ def _import_via_datumaro(
                 atype = "box"
             elif a.type == dm.AnnotationType.polygon:
                 pts = a.points
-                points = [
-                    {"x": pts[i], "y": pts[i + 1]} for i in range(0, len(pts) - 1, 2)
-                ]
+                points = [{"x": pts[i], "y": pts[i + 1]} for i in range(0, len(pts) - 1, 2)]
                 geom = {"points": points}
                 atype = "polygon"
             elif a.type == dm.AnnotationType.label:
@@ -463,9 +440,7 @@ def export_archive(
                     cy = (g.get("y", 0) + g.get("h", 0) / 2) / h
                     bw = g.get("w", 0) / w
                     bh = g.get("h", 0) / h
-                    cls_idx = (
-                        classes.index(a.class_name) if a.class_name in classes else 0
-                    )
+                    cls_idx = classes.index(a.class_name) if a.class_name in classes else 0
                     lines.append(f"{cls_idx} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
                 base_stem = Path(asset.uri).stem or asset.id
                 stem = base_stem
@@ -605,9 +580,7 @@ def _build_datumaro_dataset(
             dm.DatasetItem(
                 id=Path(asset.uri).stem,
                 annotations=ann_objs,
-                media=dm.Image(
-                    path=asset.uri, size=(asset.height or 0, asset.width or 0)
-                ),
+                media=dm.Image(path=asset.uri, size=(asset.height or 0, asset.width or 0)),
             )
         )
     return dm.Dataset.from_iterable(items, categories={dm.AnnotationType.label: cats})
@@ -659,9 +632,7 @@ def _iter_assets_with_annotations(
 
     assets = list(db.scalars(select(Asset).where(Asset.version_id == version.id)).all())
     for asset in assets:
-        anns = list(
-            db.scalars(select(Annotation).where(Annotation.asset_id == asset.id)).all()
-        )
+        anns = list(db.scalars(select(Annotation).where(Annotation.asset_id == asset.id)).all())
         yield asset, anns
 
 

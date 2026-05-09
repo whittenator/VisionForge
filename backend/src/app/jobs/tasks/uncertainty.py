@@ -9,9 +9,11 @@ from pathlib import Path
 try:
     from celery import shared_task  # type: ignore
 except Exception:  # pragma: no cover
+
     def shared_task(*args, **kwargs):
         def _wrap(fn):
             return fn
+
         return _wrap
 
 
@@ -29,7 +31,7 @@ def _extract_minio_key(uri: str) -> str:
     """Extract the object key from an asset URI."""
     for prefix in ("s3://", "minio://"):
         if uri.startswith(prefix):
-            parts = uri[len(prefix):].split("/", 1)
+            parts = uri[len(prefix) :].split("/", 1)
             return parts[1] if len(parts) > 1 else uri
     if uri.startswith("http://") or uri.startswith("https://"):
         path = uri.split("/", 3)
@@ -50,7 +52,9 @@ def _detection_uncertainty(predictions: list) -> float:
         try:
             boxes = pred.boxes
             if boxes is not None and len(boxes) > 0:
-                conf_vals = boxes.conf.tolist() if hasattr(boxes.conf, "tolist") else list(boxes.conf)
+                conf_vals = (
+                    boxes.conf.tolist() if hasattr(boxes.conf, "tolist") else list(boxes.conf)
+                )
                 confs.extend(conf_vals)
         except Exception:
             pass
@@ -73,7 +77,9 @@ def _classification_uncertainty(predictions: list) -> float:
         if probs is None:
             return 1.0
         prob_data = probs.data
-        prob_list: list[float] = prob_data.tolist() if hasattr(prob_data, "tolist") else list(prob_data)
+        prob_list: list[float] = (
+            prob_data.tolist() if hasattr(prob_data, "tolist") else list(prob_data)
+        )
         n = len(prob_list)
         if n <= 1:
             return 0.0
@@ -153,9 +159,7 @@ def score_uncertainty(payload: dict) -> dict:
                         img_path = tmp_path / f"{asset.id}.bin"
                         img_path.write_bytes(img_data)
 
-                        predictions = yolo_model.predict(
-                            str(img_path), verbose=False, conf=0.01
-                        )
+                        predictions = yolo_model.predict(str(img_path), verbose=False, conf=0.01)
                         if task_type == "classify":
                             uncertainty_score = _classification_uncertainty(predictions)
                         else:
@@ -190,6 +194,7 @@ def score_uncertainty(payload: dict) -> dict:
         try:
             if job_id:
                 from app.services.jobs_service import update_job_status
+
                 update_job_status(db, job_id, status="failed", progress=0.0)
         except Exception:
             pass

@@ -11,9 +11,11 @@ from typing import Any
 try:
     from celery import shared_task  # type: ignore
 except Exception:  # pragma: no cover - fallback when Celery not installed
+
     def shared_task(*args, **kwargs):
         def _wrap(fn):
             return fn
+
         return _wrap
 
 
@@ -32,7 +34,7 @@ def _extract_minio_key(uri: str) -> str:
     # URI may be: s3://bucket/key, minio://bucket/key, http://host/bucket/key, or plain key
     for prefix in ("s3://", "minio://"):
         if uri.startswith(prefix):
-            parts = uri[len(prefix):].split("/", 1)
+            parts = uri[len(prefix) :].split("/", 1)
             return parts[1] if len(parts) > 1 else uri
     if uri.startswith("http://") or uri.startswith("https://"):
         # http://host/bucket/key  →  key is everything after second /
@@ -84,7 +86,11 @@ def _build_yolo_dataset(
         if task_type == "classify":
             # Determine class from annotations
             ann_list = annotations_by_asset.get(asset.id, [])
-            cls_name = ann_list[0].class_name if ann_list else (class_names[0] if class_names else "unknown")
+            cls_name = (
+                ann_list[0].class_name
+                if ann_list
+                else (class_names[0] if class_names else "unknown")
+            )
             dest_dir = output_dir / split / cls_name
             dest_dir.mkdir(parents=True, exist_ok=True)
             dest_img = dest_dir / img_name
@@ -106,7 +112,9 @@ def _build_yolo_dataset(
             lines: list[str] = []
             for ann in ann_list:
                 try:
-                    geo = json.loads(ann.geometry) if isinstance(ann.geometry, str) else ann.geometry
+                    geo = (
+                        json.loads(ann.geometry) if isinstance(ann.geometry, str) else ann.geometry
+                    )
                 except Exception:
                     continue
                 cls_name = ann.class_name or ""
@@ -210,9 +218,7 @@ def train_task(payload: dict) -> dict:
             # Fetch all annotations for these assets
             asset_ids = [a.id for a in assets]
             if asset_ids:
-                ann_rows = (
-                    db.query(Annotation).filter(Annotation.asset_id.in_(asset_ids)).all()
-                )
+                ann_rows = db.query(Annotation).filter(Annotation.asset_id.in_(asset_ids)).all()
                 for ann in ann_rows:
                     annotations_by_asset.setdefault(ann.asset_id, []).append(ann)
 
@@ -422,6 +428,7 @@ def train_task(payload: dict) -> dict:
         try:
             if job_id:
                 from app.services.jobs_service import update_job_status
+
                 update_job_status(db, job_id, status="failed", progress=0.0)
         except Exception:
             pass

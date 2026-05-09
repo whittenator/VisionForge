@@ -23,6 +23,8 @@ class Project(Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="active")
+    # "detect" | "classify". NULL for legacy projects created before Phase 2.
+    task_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     tags: Mapped[str | None] = mapped_column(String(1000), nullable=True)  # JSON array
     archived_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
