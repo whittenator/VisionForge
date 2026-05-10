@@ -1,11 +1,6 @@
 # Tasks: VisionForge Web Revamp
 
-**Input**: Design documents from `/spec## Phase 3.5: UX, Performance, and Polish
-- [X] T046 [P] Playwright visual checks for key routes (header uniqueness, empty states) → `frontend/tests/visual/*`
-- [X] T047 [P] Accessibility sweep (focus rings, ARIA, skip-to-content) → `frontend/src/components/`
-- [X] T048 [P] Performance guards: uploads and annotation responsiveness; simple benchmarks or timing asserts → `backend/tests/perf/`
-- [X] T049 [P] Unit tests for validation and error handling → `backend/tests/unit/`
-- [X] T050 [P] Docs updates: api.md, manual-testing.md; update quickstart with any deltas → `specs/003-visionforge-web-revamp/`visionforge-web-revamp/`
+**Input**: Design documents from `/specs/003-visionforge-web-revamp/`
 **Prerequisites**: plan.md (required), research.md, data-model.md, contracts/
 
 ## Execution Flow (main)
@@ -76,11 +71,11 @@
 - [X] T045 Notifications: job completion events surfaced to UI (placeholder implementation) → `backend/src/app/services/`
 
 ## Phase 3.5: UX, Performance, and Polish
-- [ ] T046 [P] Playwright visual checks for key routes (header uniqueness, empty states) → `frontend/tests/visual/*`
-- [ ] T047 [P] Accessibility sweep (focus rings, ARIA, skip-to-content) → `frontend/src/components/`
-- [ ] T048 [P] Performance guards: uploads and annotation responsiveness; simple benchmarks or timing asserts → `backend/tests/perf/`
-- [ ] T049 [P] Unit tests for validation and error handling → `backend/tests/unit/`
-- [ ] T050 Docs updates: api.md, manual-testing.md; update quickstart with any deltas → `specs/003-visionforge-web-revamp/`
+- [X] T046 [P] Playwright visual checks for key routes (header uniqueness, empty states) → `frontend/tests/visual/shell_invariants.spec.ts`
+- [X] T047 [P] Accessibility sweep (focus rings, ARIA, skip-to-content) → `frontend/tests/visual/a11y_invariants.spec.ts`
+- [X] T048 [P] Performance guards: uploads and annotation responsiveness; simple benchmarks or timing asserts → `backend/tests/perf/test_annotation_perf.py`
+- [X] T049 [P] Unit tests for validation and error handling → `backend/tests/unit/test_validation_errors.py`
+- [X] T050 Docs updates: api.md, manual-testing.md; update quickstart with any deltas → `specs/003-visionforge-web-revamp/`
 
 ## Dependencies
 - T001–T005 before any tests
