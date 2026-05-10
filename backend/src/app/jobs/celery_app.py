@@ -36,6 +36,7 @@ if Celery is not None:
             "app.jobs.tasks.prelabels",
             "app.jobs.tasks.uncertainty",
             "app.jobs.tasks.error_mining",
+            "app.jobs.tasks.al_uncertainty",
         ],
     )
     celery_app.conf.task_routes = {

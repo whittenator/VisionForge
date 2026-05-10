@@ -51,3 +51,42 @@ def test_loose_predictions_have_lower_map5095():
 def test_compute_ap_helper_handles_empty():
     aps = compute_detection_ap_at_iou([], ["cat"], 0.5)
     assert aps == {"cat": 0.0}
+
+
+def test_map50_is_pinned_to_iou_0_5_regardless_of_caller_threshold():
+    """`mAP50` must always be mAP at IoU=0.50, even when caller picks 0.75.
+
+    The caller-selected threshold is reported separately under `mAP_at_iou`
+    so downstream code can reason about both metrics unambiguously.
+    """
+    items = []
+    for i in range(3):
+        gt = {"class": "cat", "bbox": (0.0, 0.0, 100.0, 100.0)}
+        # Shift by 30 pixels in x → IoU ≈ 0.538 (matches at .5 only)
+        pred = {"class": "cat", "bbox": (30.0, 0.0, 100.0, 100.0), "score": 0.99}
+        items.append({"asset_id": f"a{i}", "gt": [gt], "pred": [pred]})
+
+    metrics_at_50 = compute_detection_metrics(items, ["cat"], iou_threshold=0.5)["metrics"]
+    metrics_at_75 = compute_detection_metrics(items, ["cat"], iou_threshold=0.75)["metrics"]
+
+    # mAP50 is invariant — same value whether the caller passed 0.5 or 0.75.
+    assert metrics_at_50["mAP50"] == metrics_at_75["mAP50"]
+    # mAP_at_iou tracks the caller's choice.
+    assert metrics_at_50["mAP_at_iou"] == metrics_at_50["mAP_50"]
+    assert metrics_at_75["mAP_at_iou"] == metrics_at_75["mAP_75"]
+    # And iou_threshold is reported alongside.
+    assert metrics_at_50["iou_threshold"] == 0.5
+    assert metrics_at_75["iou_threshold"] == 0.75
+
+
+def test_non_grid_iou_threshold_is_supported():
+    """A caller-selected IoU outside the .5/.55/.../.95 grid still reports a value."""
+    items = []
+    for i in range(3):
+        gt = {"class": "cat", "bbox": (0.0, 0.0, 100.0, 100.0)}
+        pred = {"class": "cat", "bbox": (0.0, 0.0, 100.0, 100.0), "score": 0.99}
+        items.append({"asset_id": f"a{i}", "gt": [gt], "pred": [pred]})
+    metrics = compute_detection_metrics(items, ["cat"], iou_threshold=0.42)["metrics"]
+    assert metrics["iou_threshold"] == 0.42
+    assert "mAP_at_iou" in metrics
+    assert metrics["mAP50"] == 1.0  # canonical key still tied to 0.50

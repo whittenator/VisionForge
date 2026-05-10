@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
@@ -14,6 +14,7 @@ from app.schemas.common import (
 )
 from app.services import cluster_service
 from app.services.ingest_service import get_presigned_upload
+from app.services.onnx_service import OnnxDispatchError
 from app.services.onnx_service import export_onnx as svc_export_onnx
 from app.services.training_service import TaskTypeMismatch, launch_training
 
@@ -72,6 +73,8 @@ def export_onnx(
         )
     except cluster_service.ClusterNotAvailableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OnnxDispatchError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return Job(**job)
 
 
@@ -144,14 +147,18 @@ def _probe_storage() -> dict[str, str]:
 def trigger_frame_extraction(
     dataset_id: str,
     asset_id: str,
-    fps_interval: float = 1.0,
+    # Reject zero/negative intervals up-front: the worker uses this as a
+    # divisor when computing the frame step, so a 0 or negative value would
+    # blow up partway through. Cap at 600s so a typo can't queue a job that
+    # extracts a single frame from a 10-minute video.
+    fps_interval: float = Query(1.0, gt=0.0, le=600.0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Queue a frame-extraction Celery task for a video asset."""
     from app.jobs.celery_app import celery_app
     from app.models.asset import Asset
-    from app.services.jobs_service import create_job
+    from app.services.jobs_service import create_job, update_job_status
 
     asset = db.get(Asset, asset_id)
     if not asset:
@@ -173,8 +180,13 @@ def trigger_frame_extraction(
     payload["jobId"] = job.id
     try:
         celery_app.send_task("app.jobs.tasks.frame_extraction.extract_frames", args=[payload])
-    except Exception:
-        # Job row remains queued; a worker can still pick it up when broker
-        # recovers. Surface that to the caller via job status only.
-        pass
+    except Exception as exc:
+        # Don't leave the job stuck in `queued` if the broker is down.
+        try:
+            update_job_status(db, job.id, status="failed", progress=0.0)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=503, detail=f"failed to dispatch frame extraction: {exc}"
+        ) from exc
     return {"jobId": job.id, "status": "queued", "fpsInterval": fps_interval}

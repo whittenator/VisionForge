@@ -18,6 +18,7 @@ from app.models.experiment import ExperimentRun
 from app.models.user import User
 from app.schemas.common import Job
 from app.services import inference_service
+from app.services.onnx_service import OnnxDispatchError
 from app.services.onnx_service import export_onnx as svc_export_onnx
 
 router = APIRouter(prefix="/api", tags=["artifacts"])
@@ -119,6 +120,8 @@ def export_model(
         )
     except cluster_service.ClusterNotAvailableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OnnxDispatchError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return Job(**job)
 
 

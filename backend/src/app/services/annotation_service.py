@@ -31,6 +31,7 @@ def create_annotation(
     type: str,
     geometry: dict,
     class_name: str | None,
+    commit: bool = True,
 ) -> Annotation:
     if type not in ANNOTATION_TYPES:
         raise AnnotationError(
@@ -51,8 +52,11 @@ def create_annotation(
     if asset and asset.label_status in ("unlabeled", "unlabelled"):
         asset.label_status = "in_progress"
         db.add(asset)
-    db.commit()
-    db.refresh(ann)
+    if commit:
+        db.commit()
+        db.refresh(ann)
+    else:
+        db.flush()
     return ann
 
 
@@ -63,6 +67,7 @@ def update_annotation(
     geometry: dict | None = None,
     class_name: str | None = None,
     expected_version: int | None = None,
+    commit: bool = True,
 ) -> Annotation | None:
     ann = db.get(Annotation, annotation_id)
     if not ann:
@@ -108,17 +113,23 @@ def update_annotation(
         ann.reviewer_id = None
         ann.reviewed_at = None
     db.add(ann)
-    db.commit()
-    db.refresh(ann)
+    if commit:
+        db.commit()
+        db.refresh(ann)
+    else:
+        db.flush()
     return ann
 
 
-def delete_annotation(db: Session, annotation_id: str) -> bool:
+def delete_annotation(db: Session, annotation_id: str, *, commit: bool = True) -> bool:
     ann = db.get(Annotation, annotation_id)
     if not ann:
         return False
     db.delete(ann)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return True
 
 
@@ -268,9 +279,12 @@ def bulk_save(
 ) -> dict[str, Any]:
     """Apply many annotation mutations in one round-trip.
 
-    Each entry is processed independently so a single failure doesn't block
-    the rest. The response surfaces per-entry status so the client can show
-    409s on the rows that conflicted.
+    Each entry is wrapped in a SAVEPOINT (``db.begin_nested()``) so a single
+    failed row rolls back just that row, leaving the rest of the batch
+    intact. The whole batch is then committed in **one** outer transaction
+    — no more O(n) commits like the original implementation. The response
+    surfaces per-entry status so the client can show 409s on the rows that
+    conflicted.
     """
     creates = creates or []
     updates = updates or []
@@ -282,8 +296,15 @@ def bulk_save(
 
     affected_assets: set[str] = set()
 
+    # If the session has no active transaction we need to start one before
+    # opening savepoints. SQLAlchemy 2.0 autoflush sessions don't carry an
+    # implicit transaction across commits.
+    if not db.in_transaction():
+        db.begin()
+
     for c in creates:
         client_id = c.get("client_id")
+        sp = db.begin_nested()
         try:
             ann = create_annotation(
                 db,
@@ -292,7 +313,9 @@ def bulk_save(
                 type=c["type"],
                 geometry=c["geometry"],
                 class_name=c.get("class_name"),
+                commit=False,
             )
+            sp.commit()
             affected_assets.add(c["asset_id"])
             created_results.append(
                 {
@@ -302,6 +325,7 @@ def bulk_save(
                 }
             )
         except AnnotationError as exc:
+            sp.rollback()
             created_results.append({"client_id": client_id, "status": "error", "error": str(exc)})
 
     for u in updates:
@@ -309,6 +333,7 @@ def bulk_save(
         if not ann_id:
             updated_results.append({"id": None, "status": "error", "error": "missing id"})
             continue
+        sp = db.begin_nested()
         try:
             ann = update_annotation(
                 db,
@@ -316,22 +341,33 @@ def bulk_save(
                 geometry=u.get("geometry"),
                 class_name=u.get("class_name"),
                 expected_version=u.get("expected_version"),
+                commit=False,
             )
             if not ann:
+                sp.rollback()
                 updated_results.append({"id": ann_id, "status": "not_found"})
                 continue
+            sp.commit()
             affected_assets.add(ann.asset_id)
             updated_results.append({"id": ann_id, "status": "ok", "annotation": _ann_dict(ann)})
         except VersionConflictError as exc:
+            sp.rollback()
             updated_results.append({"id": ann_id, "status": "conflict", "error": str(exc)})
         except AnnotationError as exc:
+            sp.rollback()
             updated_results.append({"id": ann_id, "status": "error", "error": str(exc)})
 
     for ann_id in deletes:
         ann = db.get(Annotation, ann_id)
         if ann is not None:
             affected_assets.add(ann.asset_id)
-        ok = delete_annotation(db, ann_id)
+        sp = db.begin_nested()
+        try:
+            ok = delete_annotation(db, ann_id, commit=False)
+            sp.commit()
+        except Exception:
+            sp.rollback()
+            ok = False
         deleted_results.append({"id": ann_id, "status": "ok" if ok else "not_found"})
 
     # Best-effort: any asset that still has at least one annotation flips to
@@ -346,8 +382,9 @@ def bulk_save(
             if remaining and int(remaining) > 0:
                 asset.label_status = "in_progress"
                 db.add(asset)
-    if affected_assets:
-        db.commit()
+
+    # Single commit for the whole batch.
+    db.commit()
 
     return {
         "created": created_results,

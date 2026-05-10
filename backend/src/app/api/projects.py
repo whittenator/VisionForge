@@ -206,7 +206,12 @@ def project_wizard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Multi-step wizard endpoint. See ``ProjectWizard`` for fields."""
+    """Multi-step wizard endpoint. See ``ProjectWizard`` for fields.
+
+    All four objects (project, dataset, initial version, class map) are
+    created in a single DB transaction. If any step fails the whole thing
+    rolls back, so we never leak a half-built project to the UI.
+    """
     if payload.task_type not in VALID_TASK_TYPES:
         raise HTTPException(
             status_code=400,
@@ -218,36 +223,47 @@ def project_wizard(
     if not ws:
         workspace_id = _DEFAULT_WORKSPACE_ID
 
-    project = svc_create_project(
-        db,
-        payload.name,
-        payload.description,
-        task_type=payload.task_type,
-        workspace_id=workspace_id,
-    )
+    import json as _json
 
-    dataset, version = svc_create_dataset(
-        db,
-        project.id,
-        payload.dataset_name or "default",
-        payload.dataset_description,
-        task_type=payload.task_type,
-    )
+    from app.models.dataset import ClassMap
 
-    if payload.classes:
-        import json
-
-        from app.models.dataset import ClassMap
-
-        cm = ClassMap(
-            project_id=project.id,
-            classes=json.dumps(_list_class_names(payload.classes)),
+    try:
+        project = svc_create_project(
+            db,
+            payload.name,
+            payload.description,
+            task_type=payload.task_type,
+            workspace_id=workspace_id,
+            commit=False,
         )
-        db.add(cm)
-        db.flush()
-        dataset.class_map_id = cm.id
-        db.add(dataset)
+
+        dataset, version = svc_create_dataset(
+            db,
+            project.id,
+            payload.dataset_name or "default",
+            payload.dataset_description,
+            task_type=payload.task_type,
+            commit=False,
+        )
+
+        if payload.classes:
+            cm = ClassMap(
+                project_id=project.id,
+                classes=_json.dumps(_list_class_names(payload.classes)),
+            )
+            db.add(cm)
+            db.flush()
+            dataset.class_map_id = cm.id
+            db.add(dataset)
+            db.flush()
+
         db.commit()
+        db.refresh(project)
+        db.refresh(dataset)
+        db.refresh(version)
+    except Exception:
+        db.rollback()
+        raise
 
     return {
         "project": {

@@ -319,8 +319,10 @@ def compute_detection_metrics(
         macro_ap /= counted
 
     # mAP@[.5:.95] — average of mAP at IoU thresholds 0.50, 0.55, ..., 0.95.
-    # Skip the threshold we already computed (iou_threshold) by re-computing
-    # each one against the same items so behaviour is identical to COCO.
+    # Each threshold is computed against the same items so behaviour matches
+    # COCO. ``mAP50`` is always tied to IoU=0.50 (per the canonical definition);
+    # ``mAP_at_iou`` carries the metric at the caller-supplied threshold so
+    # downstream consumers can reason about both without naming collisions.
     iou_thresholds = [round(0.50 + 0.05 * i, 2) for i in range(10)]
     map_per_iou: dict[str, float] = {}
     sum_map = 0.0
@@ -329,16 +331,32 @@ def compute_detection_metrics(
         per_cls = compute_detection_ap_at_iou(items, classes, thr)
         valid = [v for c, v in per_cls.items() if support[c] > 0]
         m = sum(valid) / len(valid) if valid else 0.0
-        map_per_iou[f"mAP_{int(thr*100):02d}"] = round(m, 4)
+        map_per_iou[f"mAP_{int(thr * 100):02d}"] = round(m, 4)
         sum_map += m
         counted_iou += 1
     map_5095 = sum_map / counted_iou if counted_iou else 0.0
-    primary_map = round(map_per_iou.get(f"mAP_{int(iou_threshold*100):02d}", macro_ap), 4)
+    map50 = map_per_iou.get("mAP_50", round(macro_ap, 4))
+
+    # mAP at the caller-selected IoU. If the caller passed a non-grid value
+    # (anything outside .5/.55/.../.95) compute it on demand so we still
+    # report the metric they asked for.
+    iou_key = f"mAP_{int(iou_threshold * 100):02d}"
+    if iou_key in map_per_iou:
+        map_at_iou = map_per_iou[iou_key]
+    else:
+        per_cls_caller = compute_detection_ap_at_iou(items, classes, iou_threshold)
+        valid_caller = [v for c, v in per_cls_caller.items() if support[c] > 0]
+        map_at_iou = round(sum(valid_caller) / len(valid_caller) if valid_caller else 0.0, 4)
 
     return {
         "metrics": {
-            "mAP50": primary_map,
+            # Canonical mAP definitions — always tied to their fixed IoU.
+            "mAP50": map50,
             "mAP_5095": round(map_5095, 4),
+            # The caller-selected threshold, separately keyed so it never
+            # silently shadows ``mAP50`` for non-0.5 callers.
+            "mAP_at_iou": map_at_iou,
+            "iou_threshold": iou_threshold,
             **map_per_iou,
             "precision": round(macro_p, 4),
             "recall": round(macro_r, 4),

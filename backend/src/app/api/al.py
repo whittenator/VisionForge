@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,18 +17,28 @@ from app.models.asset import Asset
 from app.models.user import User
 from app.services import inference_service
 from app.services.active_learning_service import select_diverse, select_uncertain
+from app.services.asset_fetch import fetch_asset_bytes
 from app.services.embeddings_service import EmbeddingsService
 
 router = APIRouter(prefix="/api/al", tags=["active-learning"])
+
+# Hard cap on the number of assets scored inline by the API request. Larger
+# pools fall back to random for the excess + can be scored fully via the
+# `app.jobs.tasks.al_uncertainty.score_assets` Celery task. Tunable via env.
+_INLINE_SCORE_CAP = int(os.getenv("VF_AL_INLINE_SCORE_CAP", "200"))
 
 
 def _uncertainty_scores(db: Session, assets: list, model_id: str | None) -> list[float]:
     """Compute uncertainty scores for ``assets`` using ``model_id`` if available.
 
-    When a model artifact is provided we run actual inference and use a margin-
-    based uncertainty proxy (``1 - top_score``). When no model is available the
-    pre-trained bootstrap path returns a uniform random score, which is still a
-    reasonable cold-start strategy.
+    When a model artifact is provided we run actual inference on up to
+    ``_INLINE_SCORE_CAP`` assets and use a margin-based uncertainty proxy
+    (``1 - top_score``). Anything beyond the cap (or any inference failure)
+    falls back to a random score so the request stays fast and never blocks
+    indefinitely on heavy I/O. For full-pool scoring, dispatch
+    ``app.jobs.tasks.al_uncertainty.score_assets`` as a background job — it
+    persists per-asset scores into ``Asset.meta_data["uncertainty"]`` which
+    this function will pick up on subsequent calls.
     """
     if not model_id:
         return [random.random() for _ in assets]
@@ -36,37 +47,47 @@ def _uncertainty_scores(db: Session, assets: list, model_id: str | None) -> list
         return [random.random() for _ in assets]
 
     scores: list[float] = []
+    inline_budget = _INLINE_SCORE_CAP
     for asset in assets:
+        # First try a cached score from a prior background job.
+        cached = _cached_uncertainty(asset)
+        if cached is not None:
+            scores.append(cached)
+            continue
+        if inline_budget <= 0:
+            # Exceeded the per-request cap — degrade to random rather than
+            # hold up the API thread.
+            scores.append(random.random())
+            continue
         try:
-            from urllib.request import urlopen
-
-            if asset.uri.startswith(("http://", "https://")):
-                with urlopen(asset.uri, timeout=10) as response:  # noqa: S310
-                    image_bytes = response.read()
-            elif asset.uri:
-                # MinIO key
-                from app.services import storage as _storage
-
-                client = _storage.get_minio_client()
-                import os as _os
-
-                bucket = _os.getenv("MINIO_BUCKET", _os.getenv("S3_BUCKET", "visionforge"))
-                resp = client.get_object(bucket, asset.uri)
-                try:
-                    image_bytes = resp.read()
-                finally:
-                    resp.close()
-                    resp.release_conn()
-            else:
+            image_bytes = fetch_asset_bytes(asset.uri)
+            if not image_bytes:
                 scores.append(random.random())
                 continue
             result = inference_service.predict(artifact, image_bytes, score_threshold=0.0)
             top = _top_confidence(result)
             scores.append(1.0 - float(top))
         except Exception:
-            # Fall back to a random score for this asset rather than dropping it.
             scores.append(random.random())
+        inline_budget -= 1
     return scores
+
+
+def _cached_uncertainty(asset) -> float | None:
+    """Read a previously-computed uncertainty score from ``meta_data``."""
+    md = getattr(asset, "meta_data", None)
+    if not md:
+        return None
+    try:
+        parsed = json.loads(md)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    val = parsed.get("uncertainty")
+    if isinstance(val, (int, float)):
+        return float(val)
+    return None
 
 
 def _top_confidence(result: dict | list) -> float:
@@ -108,6 +129,51 @@ class ALSelectRequest(BaseModel):
     strategy: str = "uncertainty"  # "uncertainty" or "diverse"
     k: int = 20  # number of samples to select
     model_id: str | None = None  # for uncertainty scoring
+
+
+class ALScoreRequest(BaseModel):
+    dataset_version_id: str
+    artifact_id: str
+    max_assets: int = 0  # 0 = no cap
+
+
+@router.post("/score", status_code=202)
+def queue_uncertainty_scoring(
+    body: ALScoreRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Queue a Celery job that pre-computes per-asset uncertainty scores.
+
+    Use this for full-pool scoring on large datasets so `/api/al/select`
+    can read cached scores instead of running inference inline.
+    """
+    from app.jobs.celery_app import celery_app
+    from app.models.dataset_version import DatasetVersion
+    from app.services.jobs_service import create_job, update_job_status
+
+    if not db.get(ModelArtifact, body.artifact_id):
+        raise HTTPException(status_code=400, detail="artifact not found")
+    if not db.get(DatasetVersion, body.dataset_version_id):
+        raise HTTPException(status_code=400, detail="dataset version not found")
+
+    payload = {
+        "artifactId": body.artifact_id,
+        "datasetVersionId": body.dataset_version_id,
+        "maxAssets": body.max_assets,
+    }
+    job = create_job(db, "al_uncertainty", payload)
+    payload["jobId"] = job.id
+    try:
+        celery_app.send_task("app.jobs.tasks.al_uncertainty.score_assets", args=[payload])
+    except Exception as exc:
+        # Broker unavailable — surface failure rather than leaving the row queued.
+        try:
+            update_job_status(db, job.id, status="failed", progress=0.0)
+        except Exception:
+            pass
+        raise HTTPException(status_code=503, detail=f"failed to dispatch task: {exc}") from exc
+    return {"jobId": job.id, "status": "queued"}
 
 
 @router.post("/select", status_code=201)

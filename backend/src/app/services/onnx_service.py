@@ -9,6 +9,14 @@ from app.services import cluster_service
 from app.services.jobs_service import create_job
 
 
+class OnnxDispatchError(Exception):
+    """Raised when the ONNX export Celery task can't be dispatched.
+
+    The associated job row is marked ``failed`` before this is raised so the
+    UI doesn't show a phantom queued export.
+    """
+
+
 def export_onnx(
     db: Session,
     experiment_id: str,
@@ -21,8 +29,9 @@ def export_onnx(
 
     Mirrors training/evaluation behaviour: optionally reserve a cluster and
     route the Celery task to that cluster's queue. If reservation succeeds
-    but task dispatch fails (broker down), the cluster is released so we
-    don't pin capacity to a phantom job.
+    but task dispatch fails (broker down), the cluster is released and the
+    job row is flipped to ``failed`` — leaving stale ``queued`` rows around
+    is exactly the bug Copilot's review flagged.
     """
     payload: dict[str, Any] = {
         "experimentId": experiment_id,
@@ -51,17 +60,21 @@ def export_onnx(
         if queue:
             send_kwargs["queue"] = queue
         celery_app.send_task("app.jobs.tasks.onnx_export.export_task", **send_kwargs)
-    except Exception:
-        # If we already reserved a cluster, release it so capacity isn't
-        # pinned to a task no worker will ever see.
+    except Exception as exc:
+        # Release any reservation, then flip the job to failed so it doesn't
+        # sit in the dashboard as a phantom queued export.
         if cluster_id:
             try:
                 cluster_service.release_cluster(db, cluster_id)
             except Exception:
                 pass
-        # The job row is still in the DB; a worker can pick it up when the
-        # broker recovers. The cluster reservation is the only thing that
-        # could leak, and we just released it.
+        from app.services.jobs_service import update_job_status
+
+        try:
+            update_job_status(db, job_row.id, status="failed", progress=0.0)
+        except Exception:
+            pass
+        raise OnnxDispatchError(f"failed to dispatch ONNX export task: {exc}") from exc
 
     return {
         "id": job_row.id,

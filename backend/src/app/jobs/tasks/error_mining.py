@@ -54,27 +54,17 @@ def _iou(a: tuple[float, ...], b: tuple[float, ...]) -> float:
 
 
 def _predict_boxes(artifact, asset, score_threshold: float) -> list[dict[str, Any]]:
-    """Run the cached inference service against ``asset``. Returns det dicts."""
-    from urllib.request import urlopen
+    """Run the cached inference service against ``asset``. Returns det dicts.
 
-    from app.services import inference_service, storage
+    Asset URIs are resolved through ``fetch_asset_bytes`` which enforces the
+    SSRF policy (object-store keys + opt-in remote URLs with private-IP
+    blocklist). Any fetch or inference failure returns an empty prediction
+    list so the caller can keep iterating.
+    """
+    from app.services import inference_service
+    from app.services.asset_fetch import fetch_asset_bytes
 
-    image_bytes: bytes | None = None
-    try:
-        if asset.uri.startswith(("http://", "https://")):
-            with urlopen(asset.uri, timeout=10) as response:  # noqa: S310
-                image_bytes = response.read()
-        elif asset.uri:
-            client = storage.get_minio_client()
-            bucket = os.getenv("MINIO_BUCKET", os.getenv("S3_BUCKET", "visionforge"))
-            resp = client.get_object(bucket, asset.uri)
-            try:
-                image_bytes = resp.read()
-            finally:
-                resp.close()
-                resp.release_conn()
-    except Exception:
-        return []
+    image_bytes = fetch_asset_bytes(asset.uri)
     if not image_bytes:
         return []
     try:

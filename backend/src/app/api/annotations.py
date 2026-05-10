@@ -265,7 +265,7 @@ def queue_error_mining(
     from app.jobs.celery_app import celery_app
     from app.models.artifact import ModelArtifact
     from app.models.dataset_version import DatasetVersion
-    from app.services.jobs_service import create_job
+    from app.services.jobs_service import create_job, update_job_status
 
     if not db.get(ModelArtifact, body.artifact_id):
         raise HTTPException(status_code=400, detail="artifact not found")
@@ -283,7 +283,14 @@ def queue_error_mining(
     payload["jobId"] = job.id
     try:
         celery_app.send_task("app.jobs.tasks.error_mining.mine_errors", args=[payload])
-    except Exception:
-        # Job row remains queued; a worker can still pick it up later.
-        pass
+    except Exception as exc:
+        # Don't leave a phantom queued job in the dashboard if the broker is
+        # unavailable — flip it to failed and surface 503 so the UI knows.
+        try:
+            update_job_status(db, job.id, status="failed", progress=0.0)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=503, detail=f"failed to dispatch error-mining task: {exc}"
+        ) from exc
     return {"jobId": job.id, "status": "queued"}
