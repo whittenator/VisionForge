@@ -35,7 +35,9 @@ quick index — the OpenAPI document is the source of truth.
 
 ## Conventions
 
-- All UUIDs use string form. Timestamps are RFC 3339 with `Z` suffix.
+- All UUIDs use string form. Timestamps are ISO 8601 with an explicit UTC offset
+  (`+00:00`), produced by Python's `datetime.isoformat()` on timezone-aware values
+  — e.g. `"2026-05-10T13:55:43.123456+00:00"`.
 - Authentication uses a bearer token from `/auth/login` in the `Authorization: Bearer …`
   header. Refresh via `POST /auth/refresh`.
 - `Job`-returning endpoints (train, export) respond `202` with a `{id, status}` payload;
