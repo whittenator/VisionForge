@@ -15,6 +15,7 @@ VisionForge centralises dataset management, collaborative annotation, model trai
 - [Configuration](#configuration)
 - [Service Endpoints](#service-endpoints)
 - [API Overview](#api-overview)
+- [Compute Clusters](#compute-clusters)
 - [Running Tests](#running-tests)
 - [Linting & Formatting](#linting--formatting)
 - [Database Migrations](#database-migrations)
@@ -33,8 +34,9 @@ VisionForge centralises dataset management, collaborative annotation, model trai
 | **Training** | YOLO model training via Ultralytics, configurable hyperparameters, experiment tracking |
 | **Active Learning** | Uncertainty sampling, high-value sample selection, automated retrain loops |
 | **Model Registry** | Versioned artifacts, staging/production promotion, ONNX export with validation |
+| **Compute Clusters** | Register external worker nodes, live CPU/RAM/disk/GPU telemetry (NVIDIA / AMD ROCm / CPU), pick an idle cluster when launching training or ONNX export |
 | **RBAC** | Workspace-level roles: `viewer`, `annotator`, `developer`, `admin`, `owner` |
-| **Async Jobs** | Celery-backed task queue; frontend polls job status with live progress |
+| **Async Jobs** | Celery-backed task queue with per-cluster routing; frontend polls job status with live progress |
 | **Observability** | Prometheus metrics, Grafana dashboards, structured JSON logs with request IDs |
 | **API-first** | Full REST API under `/api/`; automatable end-to-end via HTTP |
 
@@ -224,8 +226,54 @@ All application routes are prefixed with `/api/`. Authentication routes are unde
 | `/api/al/` | Active learning runs and items |
 | `/api/rbac/` | Role management |
 | `/api/ops/` | Admin / ops utilities |
+| `/api/clusters/` | Compute cluster registration, live telemetry, heartbeat (agent-facing), availability selector |
 
 Full interactive documentation is available at [`/docs`](http://localhost:8000/docs) when the server is running.
+
+---
+
+## Compute Clusters
+
+VisionForge can dispatch training and ONNX export jobs to **registered compute clusters** (external worker nodes / agents) rather than running everything on the API host. The `/clusters` page shows a live grid of registered clusters with per-cluster CPU, RAM, disk and GPU telemetry, and the new-training / new-export wizards include a cluster picker grouped by Available / Unavailable.
+
+### Lifecycle
+
+1. **Register the cluster** in the UI at **`/clusters/new`** (or `POST /api/clusters`). You'll provide a name, workload `kind` (`train`, `eval`, or `both`), declared capacity (CPU cores, RAM, disk), and GPU info (vendor: `nvidia` / `rocm` / `cpu`, count, model, memory).
+2. **Save the register token**. On creation the API returns a `register_token` exactly once. The UI also generates a ready-to-run `docker run` command for the agent that embeds the token. Treat the token as a secret — it authenticates all heartbeats from the agent.
+3. **Run the agent** on the worker machine. The agent posts telemetry to `POST /api/clusters/{id}/heartbeat` (unauthenticated; the agent supplies the `register_token` in the body). A cluster is treated as **online** when its last heartbeat is within `90s`, otherwise it auto-degrades to `offline`.
+4. **Launch jobs against the cluster**. Both `/api/train` and `/api/export/onnx` accept an optional `clusterId`. If supplied, the cluster is reserved (status flips to `busy`) and the Celery task is routed to a dedicated queue `cluster.{cluster_id}` so only that cluster's agent picks it up. The cluster is released automatically when the job reaches a terminal status.
+
+### Selection rules
+
+A cluster is **available** when all of the following hold:
+- `enabled = true`
+- `status = online`
+- No `active_job_id` set (i.e., it is idle)
+- Last heartbeat received within `90s`
+- `kind` matches the requested workload (`kind = "both"` matches any)
+
+If a selected cluster is no longer available at launch time (e.g., another user grabbed it), the API returns **`409 Conflict`** and the UI surfaces the error.
+
+### API quick reference
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/api/clusters` | user | Full cluster list with telemetry |
+| `GET` | `/api/clusters/available?kind=train\|eval\|both` | user | Filtered list for the selector |
+| `POST` | `/api/clusters` | user | Register a new cluster (returns `register_token`) |
+| `GET` | `/api/clusters/{id}` | user | Single cluster detail |
+| `PATCH` | `/api/clusters/{id}` | user | Update name / description / kind / enabled |
+| `DELETE` | `/api/clusters/{id}` | user | Remove a cluster |
+| `POST` | `/api/clusters/{id}/heartbeat` | **agent token** | Push telemetry (called by the agent) |
+| `POST` | `/api/clusters/{id}/release` | user | Manually release a stuck reservation |
+
+### GPU vendors
+
+| Vendor | Toolchain |
+|---|---|
+| `nvidia` | CUDA / `nvidia-smi` — recommended for YOLO training |
+| `rocm` | AMD ROCm |
+| `cpu` | No GPU — training will run on CPU and is significantly slower |
 
 ---
 

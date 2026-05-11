@@ -240,16 +240,18 @@ Migrations live in `backend/src/app/db/migrations/versions/`. On app startup, `m
 ```
 User ──< Membership >── Workspace ──< Project ──< Dataset ──< DatasetVersion
                                                           └──< ClassMap
-Project ──< ExperimentRun
+Project ──< ExperimentRun ──> Cluster
          ──< ModelArtifact
 Dataset ──< Asset ──< Annotation
 Project ──< ALRun ──< ALItem
+Cluster (standalone — worker / agent telemetry)
 ```
 
 - All PKs are UUIDs.
 - Workspace membership uses a `Role` enum: `viewer | annotator | developer | admin | owner`.
 - `Asset.label_status` tracks annotation progress.
-- `ExperimentRun` stores `params` and `metrics` as JSON columns.
+- `ExperimentRun` stores `params` and `metrics` as JSON columns and an optional `cluster_id` FK recording which cluster ran the job.
+- `Cluster` rows store static capacity (CPU / RAM / disk / GPU), live telemetry, a `kind` (`train | eval | both`), GPU `vendor` (`nvidia | rocm | cpu`), a `status` (`online | offline | busy | error`), an `enabled` flag, and a `register_token` used by the agent to authenticate heartbeats.
 - Vector embeddings use pgvector (`pgvector` extension auto-registered in `session.py`).
 
 ---
@@ -257,7 +259,7 @@ Project ──< ALRun ──< ALItem
 ## API Structure
 
 - All routes are prefixed with `/api/` except auth (`/auth/`) and health (`/health`, `/metrics`).
-- Router files: `api/auth.py`, `api/projects.py`, `api/datasets.py`, `api/experiments.py`, `api/artifacts.py`, `api/jobs.py`, `api/al.py`, `api/ops.py`, `api/rbac.py`.
+- Router files: `api/auth.py`, `api/projects.py`, `api/datasets.py`, `api/experiments.py`, `api/artifacts.py`, `api/jobs.py`, `api/al.py`, `api/ops.py`, `api/rbac.py`, `api/clusters.py`.
 - CORS is configured for `localhost:5173` and `127.0.0.1:5173` (update for production).
 
 ---
@@ -268,7 +270,34 @@ Long-running operations (training, embedding generation, frame extraction, ONNX 
 
 - Broker: Redis (`REDIS_URL` env var)
 - Serialization: JSON
-- Queue: `default`
+- Default queue: `default`
+- Per-cluster queues: when a job is launched against a specific cluster, the task is routed to a dedicated queue named `cluster.{cluster_id}` so only that cluster's agent picks it up.
+
+---
+
+## Compute Clusters
+
+VisionForge supports first-class **compute clusters** (worker nodes / agents) for routing training and evaluation jobs. Each cluster reports live resource telemetry via heartbeat so users can pick an idle, capable cluster when launching a job.
+
+### Backend
+
+- **Model**: `models/cluster.py` — `Cluster` table holds static capacity (CPU cores, RAM, disk, GPU vendor / count / model / memory), live telemetry (CPU/RAM/disk/GPU usage, per-GPU JSON breakdown), `kind` (`train | eval | both`), `status` (`online | offline | busy | error`), `enabled`, `active_job_id`, `register_token`, and `last_heartbeat_at`.
+- **Schemas**: `schemas/cluster.py` — `ClusterCreate`, `ClusterUpdate`, `ClusterHeartbeat`, `Cluster`, `ClusterRegistration` (includes the `register_token`, returned only on creation), `ClusterSummary`, `ClusterHeartbeatAck`, plus `GpuInfo` for per-GPU telemetry.
+- **Service**: `services/cluster_service.py` — handles CRUD, heartbeat ingestion with token auth, `is_available()` filtering (enabled + online + idle + fresh heartbeat + matches workload `kind`), `reserve_cluster()` / `release_cluster()`, and stale-heartbeat auto-degrade (`HEARTBEAT_TIMEOUT = 90s`).
+- **Router**: `api/clusters.py` mounted at `/api/clusters`. The `POST /api/clusters/{id}/heartbeat` endpoint is **unauthenticated** (no user dependency) — the agent authenticates by including the cluster's `register_token` in the body.
+- **Integration**: `services/training_service.py` and `services/onnx_service.py` accept an optional `cluster_id`. On launch they call `cluster_service.reserve_cluster()` (raising `ClusterNotAvailableError` → HTTP 409 if unavailable), persist `experiment_runs.cluster_id`, and route the Celery task to the `cluster.{cluster_id}` queue. `services/jobs_service.py` calls `release_cluster()` on terminal job status.
+- **Migration**: `db/migrations/versions/0003_clusters.py` creates the `clusters` table and adds `experiment_runs.cluster_id` FK.
+
+### Frontend
+
+- **Pages**: `pages/clusters/index.tsx` (live grid polled every 5s with CPU/RAM/disk/GPU bars, vendor badges, heartbeat freshness) and `pages/clusters/new.tsx` (registration form that surfaces the agent install command and `register_token` exactly once).
+- **Component**: `components/common/ClusterSelect.tsx` is the reusable selector grouped by Available / Unavailable, used by the training and ONNX export wizards.
+- **Route**: `/clusters` and `/clusters/new`, with an `AppShell` nav entry "CLUSTERS".
+- **API contract**: training (`/api/train`) and ONNX export (`/api/export/onnx`) accept an optional `clusterId` field; both return `409` if the chosen cluster is no longer available.
+
+### Cluster Agent
+
+The agent is an unattended daemon that runs on a worker machine. After registering a cluster in the UI, install the agent on the worker using the Docker command shown on the "Cluster registered" page — it embeds the cluster ID and `register_token` as env vars. The agent then POSTs telemetry to `/api/clusters/{id}/heartbeat` periodically (default expected cadence < 90s to stay "online").
 
 ---
 
