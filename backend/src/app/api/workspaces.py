@@ -37,9 +37,7 @@ def list_workspaces(
         else []
     )
     # Also include workspaces created by user
-    own = list(
-        db.scalars(select(Workspace).where(Workspace.created_by == current_user.id)).all()
-    )
+    own = list(db.scalars(select(Workspace).where(Workspace.created_by == current_user.id)).all())
     all_ws = {w.id: w for w in workspaces_by_membership + own}
     return [
         {
@@ -125,9 +123,7 @@ def invite_member(
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
     # Look up user by email
-    invited_user = db.scalars(
-        select(User).where(User.email == body.email)
-    ).first()
+    invited_user = db.scalars(select(User).where(User.email == body.email)).first()
     if not invited_user:
         raise HTTPException(status_code=404, detail="User not found")
     # Check if already a member

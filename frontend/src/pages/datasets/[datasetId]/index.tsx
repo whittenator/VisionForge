@@ -108,6 +108,12 @@ export default function DatasetDetail() {
                 )}
               </>
             )}
+            <Link
+              to={`/datasets/${dataset.id}/review`}
+              className="inline-flex items-center h-8 px-3 text-xs font-mono border border-[var(--hud-border-strong)] text-[var(--hud-text-secondary)] hover:border-[var(--hud-accent)] hover:text-[var(--hud-accent)] transition-colors tracking-wide"
+            >
+              REVIEW
+            </Link>
             <Button size="sm" variant="outline" onClick={createSnapshot} disabled={snapshotLoading}>
               {snapshotLoading ? 'Creating…' : 'SNAPSHOT'}
             </Button>
@@ -240,6 +246,12 @@ export default function DatasetDetail() {
                 </Link>
               )}
               <Link
+                to={`/datasets/${dataset.id}/review`}
+                className="text-xs font-mono text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)] border border-[var(--hud-border-default)] px-3 py-2 hover:border-[var(--hud-accent)] transition-colors text-center"
+              >
+                Open Review Queue →
+              </Link>
+              <Link
                 to={`/datasets/version?datasetId=${dataset.id}`}
                 className="text-xs font-mono text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)] border border-[var(--hud-border-default)] px-3 py-2 hover:border-[var(--hud-accent)] transition-colors text-center"
               >
@@ -247,8 +259,125 @@ export default function DatasetDetail() {
               </Link>
             </div>
           </section>
+
+          {/* Video frame extraction */}
+          {latestVersion && (
+            <FrameExtractionCard datasetId={dataset.id} versionId={latestVersion.id} />
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+interface AssetSummary {
+  id: string;
+  uri: string;
+  mime_type?: string;
+  label_status: string;
+}
+
+function FrameExtractionCard({
+  datasetId,
+  versionId,
+}: {
+  datasetId: string;
+  versionId: string;
+}) {
+  const [videos, setVideos] = useState<AssetSummary[]>([]);
+  const [running, setRunning] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [fps, setFps] = useState(1.0);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet<{ items: AssetSummary[] }>(
+      `/api/datasets/${datasetId}/assets?version_id=${versionId}&limit=100`,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const items = data.items || [];
+        const isVideo = (a: AssetSummary) =>
+          (a.mime_type || '').toLowerCase().startsWith('video/') ||
+          a.uri.toLowerCase().endsWith('.mp4') ||
+          a.uri.toLowerCase().endsWith('.mov') ||
+          a.uri.toLowerCase().endsWith('.avi') ||
+          a.uri.toLowerCase().endsWith('.mkv') ||
+          a.uri.toLowerCase().endsWith('.webm');
+        setVideos(items.filter(isVideo));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetId, versionId]);
+
+  async function trigger(assetId: string) {
+    setRunning(assetId);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await apiPost<{ jobId: string; status: string; fpsInterval: number }>(
+        `/api/datasets/${datasetId}/assets/${assetId}/extract-frames?fps_interval=${fps}`,
+      );
+      setSuccess(`Job ${res.jobId.slice(0, 8)} queued at ${res.fpsInterval} fps interval`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to queue extraction');
+    } finally {
+      setRunning(null);
+    }
+  }
+
+  if (videos.length === 0) {
+    return null;
+  }
+
+  return (
+    <section>
+      <div className="label-overline mb-2">Video → Frames</div>
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-4 space-y-3">
+        <p className="text-xs text-[var(--hud-text-muted)]">
+          Extract one frame every <span className="text-[var(--hud-text-data)]">N</span> seconds
+          and persist as new image assets.
+        </p>
+        <div className="flex items-center gap-2 text-xs font-mono">
+          <label htmlFor="fps-int" className="text-[var(--hud-text-muted)]">
+            FPS interval
+          </label>
+          <input
+            id="fps-int"
+            type="number"
+            min={0.1}
+            step={0.1}
+            value={fps}
+            onChange={(e) => setFps(parseFloat(e.target.value) || 1.0)}
+            className="bg-[var(--hud-inset)] border border-[var(--hud-border-default)] text-[var(--hud-text-data)] px-2 py-0.5 w-20"
+          />
+          <span className="text-[var(--hud-text-muted)]">sec / frame</span>
+        </div>
+        <ul className="divide-y divide-[var(--hud-border-subtle)] text-xs font-mono">
+          {videos.map((v) => (
+            <li key={v.id} className="flex items-center justify-between py-1.5 gap-2">
+              <span className="truncate text-[var(--hud-text-secondary)]" title={v.uri}>
+                {v.uri.split('/').slice(-1)[0] || v.id.slice(0, 12)}
+              </span>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={running === v.id}
+                onClick={() => trigger(v.id)}
+              >
+                {running === v.id ? 'Queuing…' : 'EXTRACT'}
+              </Button>
+            </li>
+          ))}
+        </ul>
+        {error && <div className="text-xs font-mono text-[var(--hud-danger-text)]">{error}</div>}
+        {success && (
+          <div className="text-xs font-mono text-[var(--hud-success-text)]">{success}</div>
+        )}
+      </div>
+    </section>
   );
 }

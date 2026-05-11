@@ -46,7 +46,9 @@ export default function DatasetImport() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    apiGet<DatasetSummary[]>('/api/datasets').then(setDatasets).catch(() => {});
+    apiGet<{ items: DatasetSummary[] }>('/api/datasets?page=1&page_size=200')
+      .then((d) => setDatasets(d.items || []))
+      .catch(() => {});
     apiGet<{ formats: string[] }>('/api/datasets/formats')
       .then((r) => setFormats(r.formats))
       .catch(() => {});

@@ -41,8 +41,12 @@ export default function EvaluationsNew() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiGet<ModelArtifact[]>('/api/artifacts/models').then(setModels).catch(() => {});
-    apiGet<DatasetSummary[]>('/api/datasets').then(setDatasets).catch(() => {});
+    apiGet<{ items: ModelArtifact[] }>('/api/artifacts/models?page=1&page_size=200')
+      .then((d) => setModels(d.items || []))
+      .catch(() => {});
+    apiGet<{ items: DatasetSummary[] }>('/api/datasets?page=1&page_size=200')
+      .then((d) => setDatasets(d.items || []))
+      .catch(() => {});
   }, []);
 
   function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {

@@ -9,9 +9,11 @@ from pathlib import Path
 try:
     from celery import shared_task  # type: ignore
 except Exception:  # pragma: no cover
+
     def shared_task(*args, **kwargs):
         def _wrap(fn):
             return fn
+
         return _wrap
 
 
@@ -29,7 +31,7 @@ def _extract_minio_key(uri: str) -> str:
     """Extract the object key from an asset URI."""
     for prefix in ("s3://", "minio://"):
         if uri.startswith(prefix):
-            parts = uri[len(prefix):].split("/", 1)
+            parts = uri[len(prefix) :].split("/", 1)
             return parts[1] if len(parts) > 1 else uri
     if uri.startswith("http://") or uri.startswith("https://"):
         path = uri.split("/", 3)
@@ -120,7 +122,9 @@ def extract_frames(payload: dict) -> dict:
                         cv2.imwrite(str(local_frame), frame)
 
                         h, w = frame.shape[:2]
-                        minio_key = f"datasets/{dataset_version_id}/frames/{asset_id}/{frame_filename}"
+                        minio_key = (
+                            f"datasets/{dataset_version_id}/frames/{asset_id}/{frame_filename}"
+                        )
 
                         if minio_client:
                             try:
@@ -140,19 +144,23 @@ def extract_frames(payload: dict) -> dict:
                             mime_type="image/jpeg",
                             width=w,
                             height=h,
-                            meta_data=json.dumps({
-                                "source_asset_id": asset_id,
-                                "frame_number": frame_num,
-                                "timestamp_seconds": frame_num / video_fps,
-                            }),
+                            meta_data=json.dumps(
+                                {
+                                    "source_asset_id": asset_id,
+                                    "frame_number": frame_num,
+                                    "timestamp_seconds": frame_num / video_fps,
+                                }
+                            ),
                             label_status="unlabelled",
                         )
                         db.add(frame_asset)
-                        frame_assets.append({
-                            "id": frame_asset.id,
-                            "frame_number": frame_num,
-                            "key": minio_key,
-                        })
+                        frame_assets.append(
+                            {
+                                "id": frame_asset.id,
+                                "frame_number": frame_num,
+                                "key": minio_key,
+                            }
+                        )
 
                         # Commit in batches
                         if (extracted_count + 1) % 25 == 0:
@@ -186,6 +194,7 @@ def extract_frames(payload: dict) -> dict:
         try:
             if job_id:
                 from app.services.jobs_service import update_job_status
+
                 update_job_status(db, job_id, status="failed", progress=0.0)
         except Exception:
             pass

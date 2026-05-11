@@ -83,3 +83,10 @@ class EvaluationJobResponse(BaseModel):
     progress: float = 0.0
     evaluationId: str
     clusterId: str | None = None
+
+
+class EvaluationListPage(BaseModel):
+    items: list[EvaluationSummary]
+    total: int
+    page: int
+    page_size: int

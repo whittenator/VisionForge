@@ -76,9 +76,7 @@ def create_evaluation(
     # error propagates and the caller turns it into a 409.
     if payload.cluster_id:
         try:
-            cluster_service.reserve_cluster(
-                db, payload.cluster_id, job_id=job_row.id, kind="eval"
-            )
+            cluster_service.reserve_cluster(db, payload.cluster_id, job_id=job_row.id, kind="eval")
         except Exception:
             # Mark the queued rows as failed so the dashboard doesn't show a
             # phantom queued evaluation.
@@ -145,7 +143,17 @@ def list_evaluations(
     artifact_id: str | None = None,
     dataset_version_id: str | None = None,
     project_id: str | None = None,
-) -> list[Evaluation]:
+    page: int = 1,
+    page_size: int = 50,
+    return_total: bool = False,
+):
+    """List evaluations.
+
+    When ``return_total`` is ``True`` returns ``(rows, total)`` for paginated
+    callers; otherwise returns a flat ``list[Evaluation]`` for legacy callers.
+    """
+    from sqlalchemy import func as _func
+
     q = select(Evaluation).order_by(Evaluation.created_at.desc())
     if artifact_id:
         q = q.where(Evaluation.artifact_id == artifact_id)
@@ -153,6 +161,12 @@ def list_evaluations(
         q = q.where(Evaluation.dataset_version_id == dataset_version_id)
     if project_id:
         q = q.where(Evaluation.project_id == project_id)
+
+    if return_total:
+        total = db.scalar(select(_func.count()).select_from(q.subquery())) or 0
+        offset = max(0, (page - 1) * page_size)
+        rows = list(db.scalars(q.offset(offset).limit(page_size)).all())
+        return rows, int(total)
     return list(db.scalars(q).all())
 
 

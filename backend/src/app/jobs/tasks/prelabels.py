@@ -9,10 +9,13 @@ from pathlib import Path
 try:
     from celery import shared_task  # type: ignore
 except Exception:  # pragma: no cover
+
     def shared_task(*args, **kwargs):
         def _wrap(fn):
             return fn
+
         return _wrap
+
 
 SYSTEM_USER_ID = os.getenv("SYSTEM_USER_ID", "00000000-0000-0000-0000-000000000001")
 CONF_THRESHOLD = 0.5
@@ -32,7 +35,7 @@ def _extract_minio_key(uri: str) -> str:
     """Extract the object key from an asset URI."""
     for prefix in ("s3://", "minio://"):
         if uri.startswith(prefix):
-            parts = uri[len(prefix):].split("/", 1)
+            parts = uri[len(prefix) :].split("/", 1)
             return parts[1] if len(parts) > 1 else uri
     if uri.startswith("http://") or uri.startswith("https://"):
         path = uri.split("/", 3)
@@ -131,7 +134,9 @@ def apply_prelabels(payload: dict) -> dict:
                                 probs = getattr(pred, "probs", None)
                                 if probs is None:
                                     continue
-                                top_conf = float(probs.top1conf) if hasattr(probs, "top1conf") else 0.0
+                                top_conf = (
+                                    float(probs.top1conf) if hasattr(probs, "top1conf") else 0.0
+                                )
                                 if top_conf < conf_threshold:
                                     continue
                                 cls_idx = int(probs.top1) if hasattr(probs, "top1") else 0
@@ -152,11 +157,25 @@ def apply_prelabels(payload: dict) -> dict:
                                 boxes = getattr(pred, "boxes", None)
                                 if boxes is None or len(boxes) == 0:
                                     continue
-                                xyxy = boxes.xyxy.tolist() if hasattr(boxes.xyxy, "tolist") else list(boxes.xyxy)
-                                confs = boxes.conf.tolist() if hasattr(boxes.conf, "tolist") else list(boxes.conf)
-                                clss = boxes.cls.tolist() if hasattr(boxes.cls, "tolist") else list(boxes.cls)
+                                xyxy = (
+                                    boxes.xyxy.tolist()
+                                    if hasattr(boxes.xyxy, "tolist")
+                                    else list(boxes.xyxy)
+                                )
+                                confs = (
+                                    boxes.conf.tolist()
+                                    if hasattr(boxes.conf, "tolist")
+                                    else list(boxes.conf)
+                                )
+                                clss = (
+                                    boxes.cls.tolist()
+                                    if hasattr(boxes.cls, "tolist")
+                                    else list(boxes.cls)
+                                )
 
-                                for (x1, y1, x2, y2), conf, cls_id in zip(xyxy, confs, clss, strict=False):
+                                for (x1, y1, x2, y2), conf, cls_id in zip(
+                                    xyxy, confs, clss, strict=False
+                                ):
                                     if float(conf) < conf_threshold:
                                         continue
                                     cls_name = model_names.get(int(cls_id), str(int(cls_id)))
@@ -209,6 +228,7 @@ def apply_prelabels(payload: dict) -> dict:
         try:
             if job_id:
                 from app.services.jobs_service import update_job_status
+
                 update_job_status(db, job_id, status="failed", progress=0.0)
         except Exception:
             pass

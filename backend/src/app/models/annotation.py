@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -14,6 +14,9 @@ def _uuid() -> str:
 
 # Allowed annotation types. Keep in sync with the frontend toolbox.
 ANNOTATION_TYPES = ("box", "polygon", "keypoint", "classification")
+
+# Allowed review states.
+REVIEW_STATUSES = ("unreviewed", "approved", "rejected")
 
 
 class Annotation(Base):
@@ -32,3 +35,15 @@ class Annotation(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # JSON array of {version, geometry, class_name, updated_at}
     history: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Review workflow
+    review_status: Mapped[str] = mapped_column(String(32), nullable=False, default="unreviewed")
+    reviewer_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Error mining
+    flagged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    flag_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)

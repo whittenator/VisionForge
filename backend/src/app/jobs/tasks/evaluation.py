@@ -128,6 +128,62 @@ def compute_classification_metrics(
     }
 
 
+def _ap_from_pr(pr_data: list[tuple[float, int]], npos: int) -> float:
+    """11-point interpolated AP from a (score_desc, is_tp) list."""
+    if npos <= 0:
+        return 0.0
+    rows = sorted(pr_data, key=lambda x: -x[0])
+    cum_tp = cum_fp = 0
+    recalls = [0.0]
+    precisions = [1.0]
+    for _score, is_tp in rows:
+        if is_tp:
+            cum_tp += 1
+        else:
+            cum_fp += 1
+        recall = cum_tp / npos
+        prec = cum_tp / max(1, cum_tp + cum_fp)
+        recalls.append(recall)
+        precisions.append(prec)
+    ap = 0.0
+    for t in [i / 10 for i in range(11)]:
+        valid = [precisions[i] for i in range(len(recalls)) if recalls[i] >= t]
+        ap += max(valid) if valid else 0.0
+    return ap / 11.0
+
+
+def compute_detection_ap_at_iou(
+    items: list[dict[str, Any]], classes: list[str], iou_threshold: float
+) -> dict[str, float]:
+    """Per-class AP at a single IoU threshold. Returns {class: ap}."""
+    pr_data: dict[str, list[tuple[float, int]]] = defaultdict(list)
+    pr_npos: dict[str, int] = defaultdict(int)
+    for item in items:
+        gts = list(item.get("gt") or [])
+        preds = sorted(item.get("pred") or [], key=lambda p: -float(p.get("score", 0.0)))
+        for g in gts:
+            if g.get("class") in classes:
+                pr_npos[g["class"]] += 1
+        used = [False] * len(gts)
+        for p in preds:
+            cls = p.get("class")
+            best_j = -1
+            best_iou = 0.0
+            for j, g in enumerate(gts):
+                if used[j] or g.get("class") != cls:
+                    continue
+                iou = _iou(tuple(p["bbox"]), tuple(g["bbox"]))
+                if iou > best_iou:
+                    best_iou = iou
+                    best_j = j
+            if best_j >= 0 and best_iou >= iou_threshold:
+                used[best_j] = True
+                pr_data[cls].append((float(p.get("score", 0.0)), 1))
+            else:
+                pr_data[cls].append((float(p.get("score", 0.0)), 0))
+    return {c: _ap_from_pr(pr_data.get(c, []), pr_npos.get(c, 0)) for c in classes}
+
+
 def compute_detection_metrics(
     items: list[dict[str, Any]],
     classes: list[str],
@@ -138,6 +194,7 @@ def compute_detection_metrics(
 
     `items` is a list of {asset_id, gt: [{class, bbox}], pred: [{class, bbox, score}]}.
     bbox is (x, y, w, h) in pixel space.
+    Also computes mAP@[.5:.95] (10-point) for COCO-style reporting.
     """
     idx = {c: i for i, c in enumerate(classes)}
     matrix = [[0 for _ in classes] for _ in classes]
@@ -152,9 +209,7 @@ def compute_detection_metrics(
 
     for item in items:
         gts = list(item.get("gt") or [])
-        preds = sorted(
-            item.get("pred") or [], key=lambda p: -float(p.get("score", 0.0))
-        )
+        preds = sorted(item.get("pred") or [], key=lambda p: -float(p.get("score", 0.0)))
         for cls in {g.get("class") for g in gts}:
             if cls in idx:
                 pr_npos[cls] += sum(1 for g in gts if g.get("class") == cls)
@@ -263,9 +318,46 @@ def compute_detection_metrics(
         macro_f1 /= counted
         macro_ap /= counted
 
+    # mAP@[.5:.95] — average of mAP at IoU thresholds 0.50, 0.55, ..., 0.95.
+    # Each threshold is computed against the same items so behaviour matches
+    # COCO. ``mAP50`` is always tied to IoU=0.50 (per the canonical definition);
+    # ``mAP_at_iou`` carries the metric at the caller-supplied threshold so
+    # downstream consumers can reason about both without naming collisions.
+    iou_thresholds = [round(0.50 + 0.05 * i, 2) for i in range(10)]
+    map_per_iou: dict[str, float] = {}
+    sum_map = 0.0
+    counted_iou = 0
+    for thr in iou_thresholds:
+        per_cls = compute_detection_ap_at_iou(items, classes, thr)
+        valid = [v for c, v in per_cls.items() if support[c] > 0]
+        m = sum(valid) / len(valid) if valid else 0.0
+        map_per_iou[f"mAP_{int(thr * 100):02d}"] = round(m, 4)
+        sum_map += m
+        counted_iou += 1
+    map_5095 = sum_map / counted_iou if counted_iou else 0.0
+    map50 = map_per_iou.get("mAP_50", round(macro_ap, 4))
+
+    # mAP at the caller-selected IoU. If the caller passed a non-grid value
+    # (anything outside .5/.55/.../.95) compute it on demand so we still
+    # report the metric they asked for.
+    iou_key = f"mAP_{int(iou_threshold * 100):02d}"
+    if iou_key in map_per_iou:
+        map_at_iou = map_per_iou[iou_key]
+    else:
+        per_cls_caller = compute_detection_ap_at_iou(items, classes, iou_threshold)
+        valid_caller = [v for c, v in per_cls_caller.items() if support[c] > 0]
+        map_at_iou = round(sum(valid_caller) / len(valid_caller) if valid_caller else 0.0, 4)
+
     return {
         "metrics": {
-            "mAP50": round(macro_ap, 4),
+            # Canonical mAP definitions — always tied to their fixed IoU.
+            "mAP50": map50,
+            "mAP_5095": round(map_5095, 4),
+            # The caller-selected threshold, separately keyed so it never
+            # silently shadows ``mAP50`` for non-0.5 callers.
+            "mAP_at_iou": map_at_iou,
+            "iou_threshold": iou_threshold,
+            **map_per_iou,
             "precision": round(macro_p, 4),
             "recall": round(macro_r, 4),
             "f1": round(macro_f1, 4),
@@ -406,9 +498,7 @@ def evaluate_task(payload: dict) -> dict:
         # Determine task: detection if any annotation has type "box", else classification
         first_asset_anns = list(
             db.scalars(
-                select(Annotation).where(
-                    Annotation.asset_id.in_([a.id for a in assets[:50]])
-                )
+                select(Annotation).where(Annotation.asset_id.in_([a.id for a in assets[:50]]))
             ).all()
         )
         is_detection = any(a.type == "box" for a in first_asset_anns)
@@ -424,9 +514,7 @@ def evaluate_task(payload: dict) -> dict:
             samples: list[dict[str, Any]] = []
             for i, asset in enumerate(assets):
                 anns = list(
-                    db.scalars(
-                        select(Annotation).where(Annotation.asset_id == asset.id)
-                    ).all()
+                    db.scalars(select(Annotation).where(Annotation.asset_id == asset.id)).all()
                 )
                 gts = []
                 for a in anns:
@@ -499,9 +587,7 @@ def evaluate_task(payload: dict) -> dict:
                         progress=0.1 + 0.85 * (i / len(assets)),
                     )
 
-            result = compute_detection_metrics(
-                items, classes, iou_threshold=iou_threshold
-            )
+            result = compute_detection_metrics(items, classes, iou_threshold=iou_threshold)
             write_result(
                 db,
                 eval_id,
@@ -517,9 +603,7 @@ def evaluate_task(payload: dict) -> dict:
             samples = []
             for i, asset in enumerate(assets):
                 anns = list(
-                    db.scalars(
-                        select(Annotation).where(Annotation.asset_id == asset.id)
-                    ).all()
+                    db.scalars(select(Annotation).where(Annotation.asset_id == asset.id)).all()
                 )
                 gt_cls: str | None = None
                 for a in anns:
@@ -626,9 +710,7 @@ def _predict_detections(model, asset, score_threshold: float) -> list[dict[str, 
                     {
                         "class": names.get(cls_idx, str(cls_idx)),
                         "bbox": (cx - w / 2, cy - h / 2, w, h),
-                        "score": (
-                            float(box.conf.item()) if hasattr(box, "conf") else 0.0
-                        ),
+                        "score": (float(box.conf.item()) if hasattr(box, "conf") else 0.0),
                     }
                 )
         return out

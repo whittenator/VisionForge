@@ -12,6 +12,10 @@ from app.services import cluster_service
 from app.services.jobs_service import create_job
 
 
+class TaskTypeMismatch(Exception):
+    """Raised when a training run's task disagrees with its dataset's task_type."""
+
+
 def launch_training(
     db: Session,
     project_id: str,
@@ -23,6 +27,20 @@ def launch_training(
     owner_id: str | None = None,
     cluster_id: str | None = None,
 ) -> dict[str, Any]:
+    # Reject obvious task/dataset mismatches so we don't burn cluster time on
+    # a run we already know will fail (e.g. classify on a detection dataset).
+    from app.models.dataset import Dataset
+    from app.models.dataset_version import DatasetVersion
+
+    requested = (task or "").lower()
+    if requested in ("detect", "classify"):
+        version = db.get(DatasetVersion, dataset_version_id)
+        dataset = db.get(Dataset, version.dataset_id) if version else None
+        if dataset and dataset.task_type and dataset.task_type != requested:
+            raise TaskTypeMismatch(
+                f"task '{requested}' does not match dataset task_type " f"'{dataset.task_type}'"
+            )
+
     # Build full params including task and base_model so the worker can read them
     full_params = dict(params or {})
     full_params.setdefault("task", task)

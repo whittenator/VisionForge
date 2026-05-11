@@ -66,12 +66,12 @@ export default function ProjectDashboard() {
     Promise.all([
       apiGet<ProjectDetail>(`/api/projects/${projectId}`),
       apiGet<Dataset[]>(`/api/projects/${projectId}/datasets`),
-      apiGet<Run[]>('/api/experiments/runs'),
+      apiGet<{ items: Run[] }>(`/api/experiments/runs?project_id=${projectId}&page=1&page_size=20`),
     ])
-      .then(([proj, ds, allRuns]) => {
+      .then(([proj, ds, runsPage]) => {
         setProject(proj);
         setDatasets(ds);
-        setRuns(allRuns.filter((r) => r.project_id === projectId).slice(0, 5));
+        setRuns((runsPage.items || []).slice(0, 5));
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load project'))
       .finally(() => setLoading(false));

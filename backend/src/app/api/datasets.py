@@ -14,7 +14,7 @@ from fastapi import (
     UploadFile,
 )
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
@@ -32,6 +32,7 @@ class DatasetCreate(BaseModel):
     name: str
     description: str | None = None
     classes: list[str] | None = None  # initial class list
+    task_type: str | None = None  # "detect" | "classify"
 
 
 class SnapshotRequest(BaseModel):
@@ -42,17 +43,29 @@ class ClassesUpdate(BaseModel):
     classes: list[str]
 
 
+class TaskTypeUpdate(BaseModel):
+    task_type: str  # "detect" | "classify"
+
+
 @router.get("/datasets")
 def list_datasets(
     project_id: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    q = select(Dataset)
+    base = select(Dataset)
     if project_id:
-        q = q.where(Dataset.project_id == project_id)
-    datasets = list(db.scalars(q).all())
-    result = []
+        base = base.where(Dataset.project_id == project_id)
+
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    offset = (page - 1) * page_size
+    datasets = list(
+        db.scalars(base.order_by(Dataset.created_at.desc()).offset(offset).limit(page_size)).all()
+    )
+
+    items = []
     for d in datasets:
         latest_v = db.scalars(
             select(DatasetVersion)
@@ -60,19 +73,20 @@ def list_datasets(
             .order_by(DatasetVersion.version.desc())
             .limit(1)
         ).first()
-        result.append(
+        items.append(
             {
                 "id": d.id,
                 "project_id": d.project_id,
                 "name": d.name,
                 "description": d.description,
+                "task_type": d.task_type,
                 "latest_version": latest_v.version if latest_v else None,
                 "latest_version_id": latest_v.id if latest_v else None,
                 "asset_count": latest_v.asset_count if latest_v else 0,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
         )
-    return result
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 # NOTE: register the static `/datasets/formats` route BEFORE the dynamic
@@ -113,6 +127,7 @@ def get_dataset(
         "project_id": d.project_id,
         "name": d.name,
         "description": d.description,
+        "task_type": d.task_type,
         "classes": classes,
         "versions": [
             {
@@ -136,7 +151,16 @@ def create_dataset(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    d, v = svc_create_dataset(db, project_id, body.name, body.description)
+    try:
+        d, v = svc_create_dataset(
+            db,
+            project_id,
+            body.name,
+            body.description,
+            task_type=body.task_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     # Create ClassMap if classes provided
     if body.classes:
         cm = ClassMap(project_id=project_id, classes=json.dumps(body.classes))
@@ -145,7 +169,36 @@ def create_dataset(
         d.class_map_id = cm.id
         db.add(d)
         db.commit()
-    return {"id": d.id, "project_id": d.project_id, "name": d.name, "activeVersionId": v.id}
+    return {
+        "id": d.id,
+        "project_id": d.project_id,
+        "name": d.name,
+        "task_type": d.task_type,
+        "activeVersionId": v.id,
+    }
+
+
+@router.patch("/datasets/{dataset_id}/task-type")
+def update_dataset_task_type(
+    body: TaskTypeUpdate,
+    dataset_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.services.project_dataset_service import VALID_TASK_TYPES
+
+    if body.task_type not in VALID_TASK_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"task_type must be one of {list(VALID_TASK_TYPES)}",
+        )
+    d = db.get(Dataset, dataset_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    d.task_type = body.task_type
+    db.add(d)
+    db.commit()
+    return {"id": d.id, "task_type": d.task_type}
 
 
 @router.get("/datasets/{dataset_id}/versions")

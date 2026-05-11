@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import traceback
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 import structlog
 from fastapi.responses import JSONResponse
@@ -38,6 +38,7 @@ _WINDOW_SECONDS = 60
 
 def auth_rate_limit_middleware():
     """Simple in-memory rate limiter for /auth/* endpoints."""
+
     async def _mw(request, call_next: Callable):
         if request.url.path.startswith("/auth/"):
             client_ip = request.client.host if request.client else "unknown"

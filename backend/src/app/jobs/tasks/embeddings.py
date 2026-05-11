@@ -8,9 +8,11 @@ from pathlib import Path
 try:
     from celery import shared_task  # type: ignore
 except Exception:  # pragma: no cover
+
     def shared_task(*args, **kwargs):
         def _wrap(fn):
             return fn
+
         return _wrap
 
 
@@ -28,7 +30,7 @@ def _extract_minio_key(uri: str) -> str:
     """Extract the object key from an asset URI."""
     for prefix in ("s3://", "minio://"):
         if uri.startswith(prefix):
-            parts = uri[len(prefix):].split("/", 1)
+            parts = uri[len(prefix) :].split("/", 1)
             return parts[1] if len(parts) > 1 else uri
     if uri.startswith("http://") or uri.startswith("https://"):
         path = uri.split("/", 3)
@@ -141,6 +143,7 @@ def generate_embeddings(payload: dict) -> dict:
         try:
             if job_id:
                 from app.services.jobs_service import update_job_status
+
                 update_job_status(db, job_id, status="failed", progress=0.0)
         except Exception:
             pass

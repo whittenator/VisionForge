@@ -66,12 +66,18 @@ export default function ExperimentsNew() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    apiGet<Project[]>('/api/projects').then(setProjects).catch(console.error);
+    apiGet<{ items: Project[] }>('/api/projects?page=1&page_size=200')
+      .then((d) => setProjects(d.items || []))
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
     if (!form.projectId) { setDatasets([]); return; }
-    apiGet<Dataset[]>(`/api/datasets?project_id=${form.projectId}`).then(setDatasets).catch(console.error);
+    apiGet<{ items: Dataset[] }>(
+      `/api/datasets?project_id=${form.projectId}&page=1&page_size=200`,
+    )
+      .then((d) => setDatasets(d.items || []))
+      .catch(console.error);
   }, [form.projectId]);
 
   function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {

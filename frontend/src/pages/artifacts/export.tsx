@@ -3,19 +3,28 @@ import { useParams, Link } from 'react-router-dom';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import Alert from '@/components/ui/Alert';
+import Select from '@/components/ui/Select';
 import Loading from '@/components/common/Loading';
-import ErrorState from '@/components/common/ErrorState';
+import ClusterSelect from '@/components/common/ClusterSelect';
 import { apiGet, apiPost } from '@/services/api';
 
 interface Lineage {
-  id: string;
+  artifact?: {
+    id: string;
+    name?: string;
+    type?: string;
+    version?: number;
+    runId?: string;
+    createdAt?: string;
+    storagePath?: string;
+  };
+  // Backwards-compat: pre-Phase 3 lineage shape was flat.
+  id?: string;
   name?: string;
   type?: string;
   version?: number;
   run_id?: string;
-  project_id?: string;
   created_at?: string;
-  storage_path?: string;
 }
 
 interface JobStatus {
@@ -43,6 +52,9 @@ export default function ArtifactsExport() {
   const [job, setJob]                     = useState<JobStatus | null>(null);
   const [exporting, setExporting]         = useState(false);
   const [error, setError]                 = useState<string | null>(null);
+  const [clusterId, setClusterId]         = useState<string>('');
+  const [dynamicAxes, setDynamicAxes]     = useState<boolean>(true);
+  const [opset, setOpset]                 = useState<string>('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -78,7 +90,14 @@ export default function ArtifactsExport() {
     setExporting(true);
     setError(null);
     try {
-      const j = await apiPost<{ id: string; status: string }>(`/api/artifacts/models/${modelId}/export`, {});
+      const body: Record<string, unknown> = { dynamic_axes: dynamicAxes };
+      if (clusterId) body.cluster_id = clusterId;
+      const opsetParsed = parseInt(opset, 10);
+      if (Number.isFinite(opsetParsed) && opsetParsed > 0) body.opset = opsetParsed;
+      const j = await apiPost<{ id: string; status: string }>(
+        `/api/artifacts/models/${modelId}/export`,
+        body,
+      );
       const initial: JobStatus = { id: j.id, status: j.status, progress: 0 };
       setJob(initial);
       pollJob(j.id);
@@ -106,57 +125,69 @@ export default function ArtifactsExport() {
       {artifactError && <Alert variant="warning">Could not load model lineage: {artifactError}</Alert>}
 
       {/* Model info */}
-      {artifact && (
-        <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
-          <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
-            <div className="h-1.5 w-1.5 bg-[var(--hud-border-strong)]" />
-            <span className="label-overline">Model Info</span>
+      {artifact && (() => {
+        const a = artifact.artifact || artifact;
+        const name = (a as any).name as string | undefined;
+        const type = (a as any).type as string | undefined;
+        const version = (a as any).version as number | undefined;
+        const runId =
+          ((a as any).runId as string | undefined) ||
+          ((a as any).run_id as string | undefined);
+        const createdAt =
+          ((a as any).createdAt as string | undefined) ||
+          ((a as any).created_at as string | undefined);
+        return (
+          <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+            <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
+              <div className="h-1.5 w-1.5 bg-[var(--hud-border-strong)]" />
+              <span className="label-overline">Model Info</span>
+            </div>
+            <table className="w-full text-xs font-mono">
+              <tbody>
+                {name && (
+                  <tr className="border-b border-[var(--hud-border-subtle)]">
+                    <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Name</td>
+                    <td className="px-4 py-1.5 text-[var(--hud-text-primary)]">{name}</td>
+                  </tr>
+                )}
+                {type && (
+                  <tr className="border-b border-[var(--hud-border-subtle)]">
+                    <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Type</td>
+                    <td className="px-4 py-1.5"><Badge>{type}</Badge></td>
+                  </tr>
+                )}
+                {version != null && (
+                  <tr className="border-b border-[var(--hud-border-subtle)]">
+                    <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Version</td>
+                    <td className="px-4 py-1.5 text-[var(--hud-text-data)]">v{version}</td>
+                  </tr>
+                )}
+                {runId && (
+                  <tr className="border-b border-[var(--hud-border-subtle)]">
+                    <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Training Run</td>
+                    <td className="px-4 py-1.5">
+                      <Link
+                        to={`/experiments/runs/${runId}`}
+                        className="text-[var(--hud-accent)] hover:underline underline-offset-1"
+                      >
+                        {runId.slice(0, 12)}…
+                      </Link>
+                    </td>
+                  </tr>
+                )}
+                {createdAt && (
+                  <tr>
+                    <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Created</td>
+                    <td className="px-4 py-1.5 text-[var(--hud-text-secondary)]">
+                      {new Date(createdAt).toLocaleString()}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
-          <table className="w-full text-xs font-mono">
-            <tbody>
-              {artifact.name && (
-                <tr className="border-b border-[var(--hud-border-subtle)]">
-                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Name</td>
-                  <td className="px-4 py-1.5 text-[var(--hud-text-primary)]">{artifact.name}</td>
-                </tr>
-              )}
-              {artifact.type && (
-                <tr className="border-b border-[var(--hud-border-subtle)]">
-                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Type</td>
-                  <td className="px-4 py-1.5"><Badge>{artifact.type}</Badge></td>
-                </tr>
-              )}
-              {artifact.version != null && (
-                <tr className="border-b border-[var(--hud-border-subtle)]">
-                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Version</td>
-                  <td className="px-4 py-1.5 text-[var(--hud-text-data)]">v{artifact.version}</td>
-                </tr>
-              )}
-              {artifact.run_id && (
-                <tr className="border-b border-[var(--hud-border-subtle)]">
-                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Training Run</td>
-                  <td className="px-4 py-1.5">
-                    <Link
-                      to={`/experiments/runs/${artifact.run_id}`}
-                      className="text-[var(--hud-accent)] hover:underline underline-offset-1"
-                    >
-                      {artifact.run_id.slice(0, 12)}…
-                    </Link>
-                  </td>
-                </tr>
-              )}
-              {artifact.created_at && (
-                <tr>
-                  <td className="px-4 py-1.5 text-[var(--hud-text-muted)] uppercase">Created</td>
-                  <td className="px-4 py-1.5 text-[var(--hud-text-secondary)]">
-                    {new Date(artifact.created_at).toLocaleString()}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Export controls */}
       <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
@@ -172,9 +203,55 @@ export default function ArtifactsExport() {
           {error && <Alert variant="error">{error}</Alert>}
 
           {!job && (
-            <Button onClick={onExport} disabled={exporting || !modelId}>
-              {exporting ? 'Starting export…' : 'Export to ONNX'}
-            </Button>
+            <div className="space-y-3">
+              <div>
+                <label className="label-overline block mb-1" htmlFor="onnx-cluster">
+                  Compute Cluster
+                </label>
+                <ClusterSelect
+                  id="onnx-cluster"
+                  kind="eval"
+                  value={clusterId}
+                  onChange={setClusterId}
+                  allowAuto
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label-overline block mb-1" htmlFor="onnx-dynamic">
+                    Dynamic Axes
+                  </label>
+                  <Select
+                    id="onnx-dynamic"
+                    value={dynamicAxes ? 'on' : 'off'}
+                    onChange={(e) => setDynamicAxes(e.target.value === 'on')}
+                  >
+                    <option value="on">On (variable batch / size)</option>
+                    <option value="off">Off (fixed shapes)</option>
+                  </Select>
+                </div>
+                <div>
+                  <label className="label-overline block mb-1" htmlFor="onnx-opset">
+                    ONNX Opset
+                  </label>
+                  <Select
+                    id="onnx-opset"
+                    value={opset}
+                    onChange={(e) => setOpset(e.target.value)}
+                  >
+                    <option value="">auto</option>
+                    <option value="13">13</option>
+                    <option value="14">14</option>
+                    <option value="15">15</option>
+                    <option value="16">16</option>
+                    <option value="17">17</option>
+                  </Select>
+                </div>
+              </div>
+              <Button onClick={onExport} disabled={exporting || !modelId}>
+                {exporting ? 'Starting export…' : 'Export to ONNX'}
+              </Button>
+            </div>
           )}
 
           {job && (

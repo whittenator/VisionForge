@@ -27,6 +27,17 @@ if Celery is not None:
         "visionforge",
         broker=redis_url,
         backend=redis_url,
+        include=[
+            "app.jobs.tasks.training",
+            "app.jobs.tasks.evaluation",
+            "app.jobs.tasks.onnx_export",
+            "app.jobs.tasks.frame_extraction",
+            "app.jobs.tasks.embeddings",
+            "app.jobs.tasks.prelabels",
+            "app.jobs.tasks.uncertainty",
+            "app.jobs.tasks.error_mining",
+            "app.jobs.tasks.al_uncertainty",
+        ],
     )
     celery_app.conf.task_routes = {
         "app.jobs.tasks.*": {"queue": "default"},

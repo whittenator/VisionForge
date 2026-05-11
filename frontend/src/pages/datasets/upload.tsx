@@ -38,7 +38,9 @@ export default function DatasetUpload() {
   // Load projects for the creation form
   useEffect(() => {
     if (!datasetId) {
-      apiGet<Project[]>('/api/projects').then(setProjects).catch(console.error);
+      apiGet<{ items: Project[] }>('/api/projects?page=1&page_size=200')
+        .then((d) => setProjects(d.items || []))
+        .catch(console.error);
     }
   }, [datasetId]);
 

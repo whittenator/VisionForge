@@ -92,9 +92,7 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)) -> dict:
             detail="Terms must be accepted",
         )
     try:
-        user = auth_service.register(
-            db, name=req.name, email=str(req.email), password=req.password
-        )
+        user = auth_service.register(db, name=req.name, email=str(req.email), password=req.password)
     except auth_service.EmailAlreadyExistsError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

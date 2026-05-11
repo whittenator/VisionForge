@@ -19,6 +19,9 @@ class Dataset(Base):
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "detect" | "classify". Mirrors Project.task_type so a dataset can be
+    # validated against a training run without joining through the project.
+    task_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     class_map_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("class_maps.id"), nullable=True
     )

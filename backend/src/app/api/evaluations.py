@@ -8,6 +8,7 @@ from app.models.user import User
 from app.schemas.evaluation import (
     EvaluationCreate,
     EvaluationJobResponse,
+    EvaluationListPage,
     EvaluationOut,
     EvaluationSummary,
 )
@@ -16,21 +17,31 @@ from app.services import cluster_service, evaluation_service
 router = APIRouter(prefix="/api/evaluations", tags=["evaluations"])
 
 
-@router.get("", response_model=list[EvaluationSummary])
+@router.get("", response_model=EvaluationListPage)
 def list_evaluations(
     artifact_id: str | None = Query(None),
     dataset_version_id: str | None = Query(None),
     project_id: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    rows = evaluation_service.list_evaluations(
+    rows, total = evaluation_service.list_evaluations(
         db,
         artifact_id=artifact_id,
         dataset_version_id=dataset_version_id,
         project_id=project_id,
+        page=page,
+        page_size=page_size,
+        return_total=True,
     )
-    return [EvaluationSummary(**evaluation_service.summarize(r)) for r in rows]
+    return EvaluationListPage(
+        items=[EvaluationSummary(**evaluation_service.summarize(r)) for r in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.post("", response_model=EvaluationJobResponse, status_code=202)
