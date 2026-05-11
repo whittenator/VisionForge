@@ -63,6 +63,16 @@ class Cluster(Base):
     # Registration token used by the agent to authenticate heartbeats
     register_token: Mapped[str] = mapped_column(String(64), nullable=False, default=_token)
 
+    # Agent reachability (populated by the discovery flow)
+    agent_host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    agent_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    agent_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # OS metadata reported by the agent at discovery time
+    os_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    os_release: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    arch: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     last_heartbeat_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[object] = mapped_column(

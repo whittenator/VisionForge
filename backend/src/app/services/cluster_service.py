@@ -4,12 +4,15 @@ import json
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.cluster import Cluster
 from app.schemas.cluster import (
+    AgentInfo,
     ClusterCreate,
+    ClusterDiscoverRequest,
     ClusterHeartbeat,
     ClusterUpdate,
 )
@@ -18,6 +21,9 @@ from app.schemas.cluster import (
 # was received within this window, regardless of last persisted status.
 HEARTBEAT_TIMEOUT = timedelta(seconds=90)
 
+# Agent discovery timeouts. Kept short so an unreachable host returns quickly.
+DISCOVER_TIMEOUT = 5.0
+
 
 class ClusterError(Exception):
     pass
@@ -25,6 +31,14 @@ class ClusterError(Exception):
 
 class ClusterNotAvailableError(ClusterError):
     pass
+
+
+class AgentUnreachableError(ClusterError):
+    """Raised when the discover flow can't reach or authenticate against an agent."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason  # one of: connect | timeout | auth | bad_response
 
 
 def create_cluster(db: Session, payload: ClusterCreate) -> Cluster:
@@ -39,11 +53,143 @@ def create_cluster(db: Session, payload: ClusterCreate) -> Cluster:
         gpu_count=payload.gpu_count,
         gpu_model=payload.gpu_model,
         gpu_memory_mb=payload.gpu_memory_mb,
+        agent_host=payload.agent_host,
+        agent_port=payload.agent_port,
+        agent_version=payload.agent_version,
+        os_name=payload.os_name,
+        os_release=payload.os_release,
+        arch=payload.arch,
         status="offline",
     )
     db.add(cluster)
     db.commit()
     db.refresh(cluster)
+    return cluster
+
+
+def _probe_agent(
+    host: str,
+    port: int,
+    agent_token: str,
+    *,
+    scheme: str = "http",
+    client: httpx.Client | None = None,
+) -> AgentInfo:
+    """Call the agent's /info endpoint. Raises AgentUnreachableError on failure."""
+    base = f"{scheme}://{host}:{port}"
+    headers = {"Authorization": f"Bearer {agent_token}"}
+    own = client is None
+    c = client or httpx.Client(timeout=DISCOVER_TIMEOUT)
+    try:
+        resp = c.get(f"{base}/info", headers=headers)
+    except httpx.TimeoutException as exc:
+        raise AgentUnreachableError("timeout", f"agent {host}:{port} timed out") from exc
+    except httpx.ConnectError as exc:
+        raise AgentUnreachableError("connect", f"agent {host}:{port} not reachable") from exc
+    except httpx.HTTPError as exc:
+        raise AgentUnreachableError("connect", str(exc)) from exc
+    finally:
+        if own:
+            c.close()
+
+    if resp.status_code in (401, 403):
+        raise AgentUnreachableError("auth", "agent rejected the supplied agent token")
+    if resp.status_code != 200:
+        raise AgentUnreachableError(
+            "bad_response", f"agent returned HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+    try:
+        return AgentInfo.model_validate(resp.json())
+    except Exception as exc:
+        raise AgentUnreachableError("bad_response", f"agent /info malformed: {exc}") from exc
+
+
+def _adopt_agent(
+    host: str,
+    port: int,
+    agent_token: str,
+    cluster_id: str,
+    register_token: str,
+    api_url: str,
+    *,
+    scheme: str = "http",
+    client: httpx.Client | None = None,
+) -> None:
+    base = f"{scheme}://{host}:{port}"
+    headers = {"Authorization": f"Bearer {agent_token}"}
+    body = {"cluster_id": cluster_id, "register_token": register_token, "api_url": api_url}
+    own = client is None
+    c = client or httpx.Client(timeout=DISCOVER_TIMEOUT)
+    try:
+        resp = c.post(f"{base}/adopt", headers=headers, json=body)
+    except httpx.HTTPError as exc:
+        raise AgentUnreachableError("connect", f"adopt failed: {exc}") from exc
+    finally:
+        if own:
+            c.close()
+    if resp.status_code >= 400:
+        raise AgentUnreachableError("bad_response", f"adopt rejected: HTTP {resp.status_code}")
+
+
+def discover_cluster(
+    db: Session,
+    payload: ClusterDiscoverRequest,
+    *,
+    api_url: str,
+    client: httpx.Client | None = None,
+) -> Cluster:
+    """Probe an agent, create a Cluster row from its /info, then adopt it.
+
+    `api_url` is the publicly-reachable base URL of the platform (e.g.
+    `http://platform:8000`); this gets persisted on the agent so it knows
+    where to send heartbeats.
+    """
+    info = _probe_agent(
+        payload.host,
+        payload.port,
+        payload.agent_token,
+        scheme=payload.scheme,
+        client=client,
+    )
+
+    os_meta = info.os or {}
+    create_payload = ClusterCreate(
+        name=payload.name,
+        description=payload.description,
+        kind=payload.kind,
+        cpu_cores=info.cpu_cores,
+        ram_total_mb=info.ram_total_mb,
+        disk_total_gb=info.disk_total_gb,
+        gpu_vendor=info.gpu_vendor,
+        gpu_count=info.gpu_count,
+        gpu_model=info.gpu_model,
+        gpu_memory_mb=info.gpu_memory_mb,
+        agent_host=payload.host,
+        agent_port=payload.port,
+        agent_version=info.agent_version,
+        os_name=str(os_meta.get("name") or "") or None,
+        os_release=str(os_meta.get("release") or "") or None,
+        arch=str(os_meta.get("arch") or "") or None,
+    )
+    cluster = create_cluster(db, create_payload)
+
+    # Persist the per-GPU breakdown so the UI can display it before the first heartbeat.
+    if info.gpus:
+        cluster.gpus_json = json.dumps([g.model_dump() for g in info.gpus])
+        db.add(cluster)
+        db.commit()
+        db.refresh(cluster)
+
+    _adopt_agent(
+        payload.host,
+        payload.port,
+        payload.agent_token,
+        cluster.id,
+        cluster.register_token,
+        api_url,
+        scheme=payload.scheme,
+        client=client,
+    )
     return cluster
 
 
@@ -193,6 +339,22 @@ def release_cluster(db: Session, cluster_id: str) -> Cluster | None:
     cluster.active_job_id = None
     if cluster.status == "busy":
         cluster.status = "online"
+    db.add(cluster)
+    db.commit()
+    db.refresh(cluster)
+    return cluster
+
+
+def rotate_register_token(db: Session, cluster_id: str) -> Cluster | None:
+    import secrets
+
+    cluster = db.get(Cluster, cluster_id)
+    if not cluster:
+        return None
+    cluster.register_token = secrets.token_urlsafe(32)
+    # Force the agent to re-adopt by treating the cluster as offline until next heartbeat.
+    cluster.status = "offline"
+    cluster.last_heartbeat_at = None
     db.add(cluster)
     db.commit()
     db.refresh(cluster)

@@ -33,6 +33,11 @@ VisionForge is a full-stack computer vision platform for managing datasets, anno
 
 ```
 VisionForge/
+├── agent/                       # Cluster agent (runs on worker machines)
+│   ├── src/vf_agent/            # discover, server, heartbeat, identity, main
+│   ├── tests/                   # pytest agent/tests/
+│   ├── requirements.txt         # agent-only deps (psutil, pynvml, ...)
+│   └── Dockerfile               # builds visionforge/agent:latest
 ├── backend/
 │   ├── src/app/
 │   │   ├── main.py              # FastAPI app init, middleware, startup
@@ -81,6 +86,7 @@ VisionForge/
 ├── specs/                       # Feature specification docs
 ├── scripts/lint_all.sh          # Run all linters
 ├── docker-compose.yml
+├── compose.agent.yml            # Optional dev overlay: run the agent locally
 └── .env.example
 ```
 
@@ -277,27 +283,47 @@ Long-running operations (training, embedding generation, frame extraction, ONNX 
 
 ## Compute Clusters
 
-VisionForge supports first-class **compute clusters** (worker nodes / agents) for routing training and evaluation jobs. Each cluster reports live resource telemetry via heartbeat so users can pick an idle, capable cluster when launching a job.
+VisionForge supports first-class **compute clusters** (worker nodes / agents) for routing training, evaluation, and ONNX export jobs. Registration is **discovery-based**: the operator installs the agent on the worker, then the backend probes the agent's HTTP info endpoint to auto-populate hardware specs.
+
+### Lifecycle
+
+1. Operator runs `docker run -e VF_AGENT_TOKEN=<random> -p 9443:9443 visionforge/agent:latest` on the worker.
+2. Operator opens `/clusters/new`, enters **name + host + port + kind**, and submits. The agent token is generated client-side and embedded in the Step 1 command, so the operator never types it twice.
+3. Backend calls `GET http(s)://{host}:{port}/info` on the agent with the bearer token, validates the response, and creates a `Cluster` row populated from it.
+4. Backend then calls `POST /adopt` on the agent with `{cluster_id, register_token, api_url}`. The agent persists those to `/var/lib/vf-agent/identity.json` and starts a Celery worker bound to `cluster.{cluster_id}` plus a heartbeat loop.
+5. The agent's heartbeats keep `status` fresh; the platform routes any job with `clusterId` to the dedicated queue and the agent picks it up.
 
 ### Backend
 
-- **Model**: `models/cluster.py` — `Cluster` table holds static capacity (CPU cores, RAM, disk, GPU vendor / count / model / memory), live telemetry (CPU/RAM/disk/GPU usage, per-GPU JSON breakdown), `kind` (`train | eval | both`), `status` (`online | offline | busy | error`), `enabled`, `active_job_id`, `register_token`, and `last_heartbeat_at`.
-- **Schemas**: `schemas/cluster.py` — `ClusterCreate`, `ClusterUpdate`, `ClusterHeartbeat`, `Cluster`, `ClusterRegistration` (includes the `register_token`, returned only on creation), `ClusterSummary`, `ClusterHeartbeatAck`, plus `GpuInfo` for per-GPU telemetry.
-- **Service**: `services/cluster_service.py` — handles CRUD, heartbeat ingestion with token auth, `is_available()` filtering (enabled + online + idle + fresh heartbeat + matches workload `kind`), `reserve_cluster()` / `release_cluster()`, and stale-heartbeat auto-degrade (`HEARTBEAT_TIMEOUT = 90s`).
-- **Router**: `api/clusters.py` mounted at `/api/clusters`. The `POST /api/clusters/{id}/heartbeat` endpoint is **unauthenticated** (no user dependency) — the agent authenticates by including the cluster's `register_token` in the body.
-- **Integration**: `services/training_service.py` and `services/onnx_service.py` accept an optional `cluster_id`. On launch they call `cluster_service.reserve_cluster()` (raising `ClusterNotAvailableError` → HTTP 409 if unavailable), persist `experiment_runs.cluster_id`, and route the Celery task to the `cluster.{cluster_id}` queue. `services/jobs_service.py` calls `release_cluster()` on terminal job status.
-- **Migration**: `db/migrations/versions/0003_clusters.py` creates the `clusters` table and adds `experiment_runs.cluster_id` FK.
+- **Model**: `models/cluster.py` — `Cluster` holds static capacity (CPU / RAM / disk / GPU vendor / count / model / memory), live telemetry (CPU/RAM/disk/GPU usage + per-GPU JSON), `kind` (`train | eval | both`), `status` (`online | offline | busy | error`), `enabled`, `active_job_id`, `register_token`, `last_heartbeat_at`, **plus** `agent_host`, `agent_port`, `agent_version`, `os_name`, `os_release`, `arch`.
+- **Schemas**: `schemas/cluster.py` — `ClusterDiscoverRequest` (the operator payload), `AgentInfo` (the agent's `/info` response shape), `ClusterHeartbeat`, `Cluster`, `ClusterRegistration` (includes `register_token`, returned only on creation/rotate), `ClusterSummary`, `ClusterHeartbeatAck`, `GpuInfo`.
+- **Service**: `services/cluster_service.py` — `discover_cluster()` probes `/info` and `/adopt` via `httpx`, `record_heartbeat()` authenticates by `register_token`, `is_available()` filters (enabled + online + idle + fresh heartbeat + matches `kind`), `reserve_cluster()` / `release_cluster()`, `rotate_register_token()`, and stale-heartbeat auto-degrade (`HEARTBEAT_TIMEOUT = 90s`). `AgentUnreachableError(reason=connect|timeout|auth|bad_response)` is mapped to HTTP 502 with `[reason=...]` appended to the detail string.
+- **Router**: `api/clusters.py` mounted at `/api/clusters`. The heartbeat endpoint is **unauthenticated** (agent runs unattended; auth is via `register_token` in the body). The discover endpoint reads `VF_PLATFORM_PUBLIC_URL` (or falls back to `request.base_url`) and passes that to the agent's `/adopt` call so the agent knows where to heartbeat.
+- **Integration**: `services/training_service.py`, `services/evaluation_service.py`, and `services/onnx_service.py` accept an optional `cluster_id`. They call `reserve_cluster()` (raising `ClusterNotAvailableError` → HTTP 409 if unavailable), persist `experiment_runs.cluster_id`, and route the Celery task to `cluster.{cluster_id}`. `services/jobs_service.py` calls `release_cluster()` on terminal job status.
+- **Migrations**: `0003_clusters.py` creates the table; `0004_cluster_discovery.py` adds the agent/OS columns.
 
 ### Frontend
 
-- **Pages**: `pages/clusters/index.tsx` (live grid polled every 5s with CPU/RAM/disk/GPU bars, vendor badges, heartbeat freshness) and `pages/clusters/new.tsx` (registration form that surfaces the agent install command and `register_token` exactly once).
-- **Component**: `components/common/ClusterSelect.tsx` is the reusable selector grouped by Available / Unavailable, used by the training and ONNX export wizards.
+- **Pages**: `pages/clusters/index.tsx` (live grid polled every 5s with CPU/RAM/disk/GPU bars, vendor badges, heartbeat freshness, OS line, and agent endpoint footer) and `pages/clusters/new.tsx` (two-step wizard: Step 1 shows the `docker run` install command with a client-generated `VF_AGENT_TOKEN`; Step 2 takes name + host + port + kind and submits `POST /api/clusters/discover`).
+- **Component**: `components/common/ClusterSelect.tsx` — selector grouped by Available / Unavailable, used by training and ONNX export wizards.
 - **Route**: `/clusters` and `/clusters/new`, with an `AppShell` nav entry "CLUSTERS".
-- **API contract**: training (`/api/train`) and ONNX export (`/api/export/onnx`) accept an optional `clusterId` field; both return `409` if the chosen cluster is no longer available.
+- **API contract**: training (`/api/train`), evaluation (`/api/evaluations`), and ONNX export (`/api/export/onnx`) accept an optional `clusterId`; all return `409` if the chosen cluster is no longer available.
 
-### Cluster Agent
+### Agent Runtime
 
-The agent is an unattended daemon that runs on a worker machine. After registering a cluster in the UI, install the agent on the worker using the Docker command shown on the "Cluster registered" page — it embeds the cluster ID and `register_token` as env vars. The agent then POSTs telemetry to `/api/clusters/{id}/heartbeat` periodically (default expected cadence < 90s to stay "online").
+The agent lives in `agent/` and is built from `agent/Dockerfile`. It is a single image bundling the backend's `app.jobs.tasks.*` (so it can run training / evaluation / ONNX export jobs) plus the agent-only modules under `agent/src/vf_agent/`:
+
+- `discover.py` — hardware + OS probe via `psutil`, `pynvml` (NVIDIA), and `rocm-smi` (AMD).
+- `server.py` — FastAPI HTTP server exposing `GET /health` (unauth), `GET /info`, `GET /telemetry`, `POST /adopt` (all bearer-auth via `VF_AGENT_TOKEN`).
+- `heartbeat.py` — pushes telemetry to `/api/clusters/{id}/heartbeat` every `VF_AGENT_HEARTBEAT_INTERVAL` seconds.
+- `identity.py` — persists `{cluster_id, register_token, api_url}` to `/var/lib/vf-agent/identity.json` after adoption.
+- `main.py` — supervisor that starts the HTTP server, blocks until adoption, then spawns the heartbeat process and Celery worker bound to `cluster.{cluster_id}`.
+
+Two tokens are in play:
+- `VF_AGENT_TOKEN` — operator-supplied secret set at `docker run` time. Authenticates the platform → agent direction (calls to `/info`, `/telemetry`, `/adopt`).
+- `register_token` — platform-issued on cluster creation. Authenticates the agent → platform direction (heartbeats). Rotatable via `POST /api/clusters/{id}/rotate-token`.
+
+Tests for the agent live in `agent/tests/` (`pytest agent/tests/`) and use `httpx.MockTransport` to stay hermetic.
 
 ---
 

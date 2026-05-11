@@ -234,38 +234,73 @@ Full interactive documentation is available at [`/docs`](http://localhost:8000/d
 
 ## Compute Clusters
 
-VisionForge can dispatch training and ONNX export jobs to **registered compute clusters** (external worker nodes / agents) rather than running everything on the API host. The `/clusters` page shows a live grid of registered clusters with per-cluster CPU, RAM, disk and GPU telemetry, and the new-training / new-export wizards include a cluster picker grouped by Available / Unavailable.
+VisionForge can dispatch training, evaluation, and ONNX export jobs to **registered compute clusters** (external worker nodes) rather than running everything on the API host. The `/clusters` page shows a live grid with per-cluster CPU, RAM, disk and GPU telemetry, OS info, and agent version. The training, evaluation, and ONNX export wizards include a cluster picker grouped by Available / Unavailable.
 
-### Lifecycle
+Registration is **discovery-based**: you install a `vf-agent` Docker container on the worker, and the platform reaches out to it to auto-detect hardware. No manual spec entry.
 
-1. **Register the cluster** in the UI at **`/clusters/new`** (or `POST /api/clusters`). You'll provide a name, workload `kind` (`train`, `eval`, or `both`), declared capacity (CPU cores, RAM, disk), and GPU info (vendor: `nvidia` / `rocm` / `cpu`, count, model, memory).
-2. **Save the register token**. On creation the API returns a `register_token` exactly once. The UI also generates a ready-to-run `docker run` command for the agent that embeds the token. Treat the token as a secret — it authenticates all heartbeats from the agent.
-3. **Run the agent** on the worker machine. The agent posts telemetry to `POST /api/clusters/{id}/heartbeat` (unauthenticated; the agent supplies the `register_token` in the body). A cluster is treated as **online** when its last heartbeat is within `90s`, otherwise it auto-degrades to `offline`.
-4. **Launch jobs against the cluster**. Both `/api/train` and `/api/export/onnx` accept an optional `clusterId`. If supplied, the cluster is reserved (status flips to `busy`) and the Celery task is routed to a dedicated queue `cluster.{cluster_id}` so only that cluster's agent picks it up. The cluster is released automatically when the job reaches a terminal status.
+### Step 1 · Install the agent on the worker
+
+Run this on the worker machine. The UI at **`/clusters/new`** generates the exact command for you (with a freshly-randomised token), but the shape is:
+
+```bash
+docker run -d --name vf-agent \
+  --restart unless-stopped \
+  --gpus all \
+  -p 9443:9443 \
+  -v vf-agent-state:/var/lib/vf-agent \
+  -e VF_AGENT_TOKEN=<random-secret> \
+  -e REDIS_URL=redis://<platform-host>:6379/0 \
+  visionforge/agent:latest
+```
+
+The agent exposes:
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /health` | none | Liveness check |
+| `GET /info` | `Bearer $VF_AGENT_TOKEN` | Full hardware + OS snapshot used by discovery |
+| `GET /telemetry` | `Bearer $VF_AGENT_TOKEN` | Live CPU/RAM/disk/GPU usage |
+| `POST /adopt` | `Bearer $VF_AGENT_TOKEN` | Called once by the platform to assign `cluster_id` + `register_token` |
+
+Until adoption, the agent does **not** start its Celery worker — it cannot pick up jobs.
+
+### Step 2 · Register the cluster from the UI
+
+At `/clusters/new`, enter:
+
+- **Name** — display label.
+- **Host** — IP or hostname reachable from the platform.
+- **Port** — `9443` by default.
+- **Workload kind** — `train`, `eval`, or `both`.
+
+The agent token from Step 1 is pre-filled. On submit, the backend calls `GET /info` on the agent, creates the `Cluster` row populated from the response, then calls `POST /adopt` so the agent knows its `cluster_id`. The agent immediately starts a Celery worker subscribed to `cluster.{cluster_id}` and a heartbeat loop targeting the platform.
+
+If the agent is unreachable, the API returns **`502 Bad Gateway`** with `[reason=connect|timeout|auth|bad_response]` appended to the detail; the UI surfaces a matching hint (e.g. "agent rejected the token").
 
 ### Selection rules
 
-A cluster is **available** when all of the following hold:
+A cluster is **available** when:
 - `enabled = true`
 - `status = online`
 - No `active_job_id` set (i.e., it is idle)
 - Last heartbeat received within `90s`
 - `kind` matches the requested workload (`kind = "both"` matches any)
 
-If a selected cluster is no longer available at launch time (e.g., another user grabbed it), the API returns **`409 Conflict`** and the UI surfaces the error.
+If a selected cluster is no longer available at launch time, the relevant endpoint returns **`409 Conflict`**.
 
 ### API quick reference
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/clusters` | user | Full cluster list with telemetry |
+| `GET` | `/api/clusters` | user | Full cluster list with telemetry, OS, agent metadata |
 | `GET` | `/api/clusters/available?kind=train\|eval\|both` | user | Filtered list for the selector |
-| `POST` | `/api/clusters` | user | Register a new cluster (returns `register_token`) |
+| `POST` | `/api/clusters/discover` | user | Probe a running agent and register the cluster |
 | `GET` | `/api/clusters/{id}` | user | Single cluster detail |
 | `PATCH` | `/api/clusters/{id}` | user | Update name / description / kind / enabled |
 | `DELETE` | `/api/clusters/{id}` | user | Remove a cluster |
-| `POST` | `/api/clusters/{id}/heartbeat` | **agent token** | Push telemetry (called by the agent) |
+| `POST` | `/api/clusters/{id}/heartbeat` | **register_token** | Push telemetry (called by the agent) |
 | `POST` | `/api/clusters/{id}/release` | user | Manually release a stuck reservation |
+| `POST` | `/api/clusters/{id}/rotate-token` | user | Issue a new `register_token`; old one is invalidated |
 
 ### GPU vendors
 
@@ -274,6 +309,25 @@ If a selected cluster is no longer available at launch time (e.g., another user 
 | `nvidia` | CUDA / `nvidia-smi` — recommended for YOLO training |
 | `rocm` | AMD ROCm |
 | `cpu` | No GPU — training will run on CPU and is significantly slower |
+
+### Local development
+
+To run the agent on the same Docker network as the platform for testing:
+
+```bash
+VF_AGENT_TOKEN=dev-agent-token \
+  docker compose -f docker-compose.yml -f compose.agent.yml up -d agent
+```
+
+Then at `/clusters/new` use host `agent`, port `9443`, token `dev-agent-token`.
+
+### Security
+
+The agent's HTTP API is plain HTTP by default; deploy agents on a **private network or VPN**. The `scheme=https` option in the discover request is supported but you are responsible for terminating TLS in front of the agent.
+
+Two tokens are involved:
+- **`VF_AGENT_TOKEN`** — operator-supplied; the platform uses it to talk to the agent (`/info`, `/telemetry`, `/adopt`).
+- **`register_token`** — platform-issued at discovery time; the agent uses it to heartbeat. Rotatable via `POST /api/clusters/{id}/rotate-token`.
 
 ---
 
