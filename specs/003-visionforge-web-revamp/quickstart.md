@@ -24,5 +24,23 @@ This quickstart validates the core user journey using contracts and test scaffol
 - Empty states for Projects/Datasets/Experiments/Artifacts show appropriate primary CTAs.
 - URL-persisted filters restore on reload.
 
+These are enforced by Playwright specs in `frontend/tests/visual/`:
+- `shell_invariants.spec.ts` — header uniqueness, empty-state CTAs, URL filter persistence.
+- `a11y_invariants.spec.ts` — single `<h1>` per route, skip-to-content focus order, labelled inputs.
+
+## Performance Budgets
+- API p95 < 200ms (`backend/tests/perf/test_api_perf.py`).
+- Annotation create + update p95 < 100ms (`backend/tests/perf/test_annotation_perf.py`).
+- Upload presign p95 < 50ms (service-level, MinIO disabled).
+- ONNX export job completes within budget (`backend/tests/perf/test_onnx_regression.py`).
+
+## Validation & Error Coverage
+- Service-level validation/error paths covered by `backend/tests/unit/test_validation_errors.py`
+  (annotation type/geometry, version conflicts, schema validation, cluster availability).
+
 ## Cleanup
 - Archive the test project and delete test data.
+
+## Reference
+- API reference: [`api.md`](./api.md) — index over `contracts/openapi.yaml`.
+- Manual checklist: [`manual-testing.md`](./manual-testing.md).
