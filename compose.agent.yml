@@ -11,9 +11,12 @@
 # In production the agent runs on the worker machine, not in this compose file.
 services:
   agent:
+    # Default to the CPU variant for local-dev so the overlay builds on any host.
+    # On a worker with a GPU you'd run the production image directly:
+    #   docker run ... visionforge/agent:nvidia    (or :rocm)
     build:
       context: .
-      dockerfile: agent/Dockerfile
+      dockerfile: agent/Dockerfile.cpu
     environment:
       VF_AGENT_TOKEN: ${VF_AGENT_TOKEN:-dev-agent-token}
       VF_AGENT_PORT: "9443"

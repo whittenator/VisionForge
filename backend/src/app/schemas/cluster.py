@@ -48,7 +48,12 @@ class ClusterCreate(BaseModel):
 
 
 class ClusterDiscoverRequest(BaseModel):
-    """Operator-supplied tuple used to reach a running agent on the worker."""
+    """Operator-supplied tuple used to reach a running agent on the worker.
+
+    `gpu_vendor` records the operator's selection in the wizard (which image
+    they installed). When set, the backend enforces it against the agent's
+    own report at `/info` and rejects the discovery if they disagree.
+    """
 
     name: str = Field(..., min_length=1, max_length=255)
     host: str = Field(..., min_length=1, max_length=255)
@@ -57,6 +62,7 @@ class ClusterDiscoverRequest(BaseModel):
     kind: ClusterKind = "both"
     description: str | None = None
     scheme: Literal["http", "https"] = "http"
+    gpu_vendor: GpuVendor | None = None
 
 
 class AgentInfo(BaseModel):

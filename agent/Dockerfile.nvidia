@@ -1,0 +1,37 @@
+FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-devel
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src:/agent/src \
+    DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# OS packages: rocm-smi is intentionally absent here (CUDA build); we still
+# install curl + ca-certificates so the heartbeat client has trust roots.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install backend deps. Torch / torchvision are already present in the base
+# image (CUDA 13 build); pip leaves them alone because the requirements spec
+# `torch>=2.3` is already satisfied. Anything that depends on torch (Ultralytics,
+# open-clip-torch) reuses the installed CUDA wheels.
+COPY backend/requirements.txt /tmp/req.backend.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r /tmp/req.backend.txt
+
+# Backend source supplies the Celery app + task modules executed by the worker.
+COPY backend /app
+
+# Agent-only deps (psutil, pynvml, fastapi, httpx, uvicorn).
+COPY agent/requirements.txt /agent/requirements.txt
+RUN pip install --no-cache-dir -r /agent/requirements.txt
+COPY agent /agent
+
+# Identity persists across container restarts; mount a volume in production.
+RUN mkdir -p /var/lib/vf-agent && chmod 700 /var/lib/vf-agent
+
+EXPOSE 9443
+
+ENTRYPOINT ["python", "-m", "vf_agent.main"]

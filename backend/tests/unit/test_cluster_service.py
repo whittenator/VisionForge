@@ -256,6 +256,107 @@ def test_discover_returns_auth_error_on_401(db):
     assert exc.value.reason == "auth"
 
 
+def _info_handler(gpu_vendor: str):
+    """Build a MockTransport handler whose /info reports the given vendor."""
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/info"):
+            return httpx.Response(
+                200,
+                json={
+                    "cpu_cores": 8,
+                    "ram_total_mb": 16384,
+                    "disk_total_gb": 256,
+                    "gpu_vendor": gpu_vendor,
+                    "gpu_count": 0 if gpu_vendor == "cpu" else 1,
+                    "gpu_model": None if gpu_vendor == "cpu" else "GPU",
+                    "gpu_memory_mb": 0 if gpu_vendor == "cpu" else 24576,
+                    "gpus": [],
+                    "cpu_usage_pct": 0.0,
+                    "ram_used_mb": 0,
+                    "disk_used_gb": 0,
+                    "gpu_usage_pct": 0.0,
+                    "os": {"name": "Linux", "release": "6.18.5", "arch": "x86_64"},
+                    "agent_version": "0.1.0",
+                },
+            )
+        if request.url.path.endswith("/adopt"):
+            return httpx.Response(200, json={"ok": True})
+        return httpx.Response(404)
+
+    return handler
+
+
+def test_discover_rejects_vendor_mismatch(db):
+    import httpx
+
+    from app.schemas.cluster import ClusterDiscoverRequest
+
+    # Operator selected ROCm in the wizard, but the agent reports NVIDIA.
+    transport = httpx.MockTransport(_info_handler("nvidia"))
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(cluster_service.AgentUnreachableError) as exc:
+            cluster_service.discover_cluster(
+                db,
+                ClusterDiscoverRequest(
+                    name="rig",
+                    host="h",
+                    port=9443,
+                    agent_token="t",
+                    kind="both",
+                    gpu_vendor="rocm",
+                ),
+                api_url="http://platform:8000",
+                client=client,
+            )
+    assert exc.value.reason == "vendor_mismatch"
+    # No cluster row should have been created on rejection.
+    assert cluster_service.list_clusters(db) == []
+
+
+def test_discover_accepts_matching_vendor(db):
+    import httpx
+
+    from app.schemas.cluster import ClusterDiscoverRequest
+
+    transport = httpx.MockTransport(_info_handler("nvidia"))
+    with httpx.Client(transport=transport) as client:
+        cluster = cluster_service.discover_cluster(
+            db,
+            ClusterDiscoverRequest(
+                name="rig",
+                host="h",
+                port=9443,
+                agent_token="t",
+                kind="both",
+                gpu_vendor="nvidia",
+            ),
+            api_url="http://platform:8000",
+            client=client,
+        )
+    assert cluster.gpu_vendor == "nvidia"
+
+
+def test_discover_without_vendor_trusts_agent(db):
+    import httpx
+
+    from app.schemas.cluster import ClusterDiscoverRequest
+
+    # gpu_vendor omitted (backwards-compatible): the agent's report wins.
+    transport = httpx.MockTransport(_info_handler("rocm"))
+    with httpx.Client(transport=transport) as client:
+        cluster = cluster_service.discover_cluster(
+            db,
+            ClusterDiscoverRequest(
+                name="rig", host="h", port=9443, agent_token="t", kind="both"
+            ),
+            api_url="http://platform:8000",
+            client=client,
+        )
+    assert cluster.gpu_vendor == "rocm"
+
+
 def test_rotate_register_token_invalidates_old_token(db):
     cluster = _create(db)
     old_token = cluster.register_token

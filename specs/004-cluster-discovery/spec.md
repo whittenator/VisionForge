@@ -58,12 +58,13 @@ This closes the gap where the previous design referenced a `visionforge/agent:la
 | F2 | The agent exposes `GET /telemetry` returning current usage figures. |
 | F3 | The agent exposes `POST /adopt` accepting `{cluster_id, register_token, api_url}` and persisting them to a volume. |
 | F4 | `/info`, `/telemetry`, `/adopt` all require `Authorization: Bearer $VF_AGENT_TOKEN`. `/health` is unauthenticated. |
-| F5 | `POST /api/clusters/discover` (auth: user) takes `{name, host, port, agent_token, kind, description?, scheme?}`, calls the agent's `/info` then `/adopt`, persists a `Cluster` row, and returns it including `register_token`. |
-| F6 | The platform returns HTTP 502 with a `[reason=connect\|timeout\|auth\|bad_response]` suffix when the agent is unreachable. |
+| F5 | `POST /api/clusters/discover` (auth: user) takes `{name, host, port, agent_token, kind, description?, scheme?, gpu_vendor?}`, calls the agent's `/info` then `/adopt`, persists a `Cluster` row, and returns it including `register_token`. |
+| F6 | The platform returns HTTP 502 with a `[reason=connect\|timeout\|auth\|bad_response\|vendor_mismatch]` suffix when the agent is unreachable or its reported `gpu_vendor` disagrees with the operator's selection. |
 | F7 | `POST /api/clusters/{id}/rotate-token` re-issues `register_token` and forces the cluster to `offline`, invalidating the agent's old token. |
 | F8 | The agent's Celery worker subscribes to queue `cluster.{cluster_id}` only after adoption. |
 | F9 | The cluster row stores `agent_host`, `agent_port`, `agent_version`, `os_name`, `os_release`, `arch` alongside the existing fields. |
-| F10 | The UI removes manual hardware-entry fields. The "Register cluster" wizard shows the `docker run` command with a pre-generated agent token, then asks only for name + host + port + kind. |
+| F10 | The UI removes manual hardware-entry fields. The "Register cluster" wizard asks the operator to pick the GPU vendor, shows the `curl … /api/agents/install.sh | … bash` one-liner (carrying a pre-generated agent token and the chosen `VF_VENDOR`), then asks only for name + host + port + kind. |
+| F11 | The agent is published as three vendor images (`visionforge/agent:{nvidia,rocm,cpu}`) built from `Dockerfile.{nvidia,rocm,cpu}`. The platform hosts a parameterised installer at `GET /api/agents/install.sh` (unauthenticated) that selects the image and GPU flags from `VF_VENDOR`. |
 
 ## Out of Scope (Documented)
 
@@ -77,4 +78,5 @@ This closes the gap where the previous design referenced a `visionforge/agent:la
 2. Agent unit tests pass: `pytest agent/tests/` (8 tests covering server auth, /info shape, adopt persistence, heartbeat payload, transport error handling).
 3. Backend cluster unit + integration tests pass: 12 unit tests + 7 integration tests, including a stubbed end-to-end that asserts training jobs route to `cluster.{cluster_id}` and the cluster transitions to `busy`.
 4. The UI wizard at `/clusters/new` collects only name + host + port + kind; submitting it against a stub agent shows the discovered hardware in the success page.
-5. `docker build -t visionforge/agent:dev -f agent/Dockerfile .` succeeds and produces an image that includes torch, ultralytics, onnxruntime, psutil, and pynvml.
+5. `docker build -t visionforge/agent:cpu -f agent/Dockerfile.cpu .` (and the `nvidia` / `rocm` variants on a suitable host) succeeds and produces an image that includes torch, ultralytics, onnxruntime, psutil, and pynvml.
+6. `GET /api/agents/install.sh` returns a shell script (`text/x-shellscript`) whose vendor branch selects the matching image and GPU flags; piping it with `VF_VENDOR=rocm` against an NVIDIA agent is rejected at discovery with `[reason=vendor_mismatch]`.

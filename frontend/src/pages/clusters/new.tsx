@@ -7,13 +7,15 @@ import Alert from '@/components/ui/Alert';
 import Badge from '@/components/ui/Badge';
 import { apiPost } from '@/services/api';
 
+type Vendor = 'nvidia' | 'rocm' | 'cpu';
+
 interface DiscoveredCluster {
   id: string;
   name: string;
   cpu_cores: number;
   ram_total_mb: number;
   disk_total_gb: number;
-  gpu_vendor: 'nvidia' | 'rocm' | 'cpu';
+  gpu_vendor: Vendor;
   gpu_count: number;
   gpu_model?: string | null;
   gpu_memory_mb: number;
@@ -27,8 +29,8 @@ interface DiscoveredCluster {
 }
 
 function randomToken(): string {
-  // 32-byte URL-safe token, generated client-side so the operator never has to
-  // think one up. The agent reads this value as VF_AGENT_TOKEN.
+  // 32-byte URL-safe token, generated client-side so the operator never has
+  // to think one up. The installer passes this through as VF_AGENT_TOKEN.
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return btoa(String.fromCharCode(...bytes))
@@ -37,9 +39,28 @@ function randomToken(): string {
     .replace(/=+$/, '');
 }
 
+const VENDOR_DETAILS: Record<Vendor, { label: string; image: string; hint: string }> = {
+  nvidia: {
+    label: 'NVIDIA (CUDA)',
+    image: 'visionforge/agent:nvidia',
+    hint: 'Requires the NVIDIA Container Toolkit on the worker. Base image: pytorch/pytorch:2.10.0-cuda13.0-cudnn9-devel.',
+  },
+  rocm: {
+    label: 'AMD (ROCm)',
+    image: 'visionforge/agent:rocm',
+    hint: 'Requires the ROCm 7.2+ kernel module on the worker. Base image: rocm/pytorch:rocm7.2.3_ubuntu24.04_py3.12_pytorch_release_2.10.0.',
+  },
+  cpu: {
+    label: 'CPU only (no GPU)',
+    image: 'visionforge/agent:cpu',
+    hint: 'Training will run on CPU and is much slower. Use this for dev / CI or boxes without a discrete GPU.',
+  },
+};
+
 export default function ClustersNew() {
   const navigate = useNavigate();
   const [agentToken] = useState<string>(() => randomToken());
+  const [vendor, setVendor] = useState<Vendor>('nvidia');
   const [form, setForm] = useState({
     name: '',
     host: '',
@@ -52,17 +73,19 @@ export default function ClustersNew() {
   const [error, setError] = useState<string | null>(null);
   const [registered, setRegistered] = useState<DiscoveredCluster | null>(null);
 
-  const installCmd = useMemo(() => {
-    const apiBase = window.location.origin.replace(':5173', ':8000');
-    return `docker run -d --name vf-agent \\
-  --restart unless-stopped \\
-  --gpus all \\
-  -p 9443:9443 \\
-  -v vf-agent-state:/var/lib/vf-agent \\
-  -e VF_AGENT_TOKEN=${agentToken} \\
-  -e REDIS_URL=${apiBase.replace(/:\d+$/, ':6379')}/0 \\
-  visionforge/agent:latest`;
-  }, [agentToken]);
+  const platformBase = useMemo(
+    () => window.location.origin.replace(':5173', ':8000'),
+    [],
+  );
+
+  // The curl-piped installer is the canonical path: one line, no copy-paste
+  // surface area for typos. It calls back to /api/agents/install.sh on this
+  // platform so future installer changes don't require updating the UI.
+  const curlOneLiner = useMemo(
+    () =>
+      `curl -fsSL ${platformBase}/api/agents/install.sh | VF_AGENT_TOKEN=${agentToken} VF_VENDOR=${vendor} bash`,
+    [platformBase, agentToken, vendor],
+  );
 
   function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -83,11 +106,12 @@ export default function ClustersNew() {
         kind: form.kind,
         description: form.description || undefined,
         scheme: form.scheme,
+        gpu_vendor: vendor,
       });
       setRegistered(res);
     } catch (err) {
       // The API returns 502 with detail "<message> [reason=<code>]" for
-      // agent-unreachable errors; surface a human-readable hint for the code.
+      // agent-unreachable errors; surface a human-readable hint per code.
       const raw = err instanceof Error ? err.message : 'Failed to register cluster';
       const m = raw.match(/\[reason=([a-z_]+)\]/);
       const hint =
@@ -99,7 +123,9 @@ export default function ClustersNew() {
               ? ' (agent rejected the token)'
               : m?.[1] === 'bad_response'
                 ? ' (agent returned malformed data)'
-                : '';
+                : m?.[1] === 'vendor_mismatch'
+                  ? ` (you selected ${vendor} but the agent reports a different GPU vendor)`
+                  : '';
       setError(`${raw}${hint}`);
     } finally {
       setLoading(false);
@@ -166,8 +192,8 @@ export default function ClustersNew() {
           <div className="label-overline mb-0.5">// Clusters / New</div>
           <h1>Register Cluster</h1>
           <p className="text-xs text-[var(--hud-text-muted)] mt-1">
-            VisionForge auto-discovers hardware from a running agent. Install the agent first,
-            then enter the worker's IP below.
+            VisionForge auto-discovers hardware from a running agent. Pick the worker's GPU
+            vendor, run the install command, then enter the worker's address below.
           </p>
         </div>
         <Link
@@ -178,19 +204,62 @@ export default function ClustersNew() {
         </Link>
       </div>
 
-      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3 space-y-2">
-        <div className="label-overline">Step 1 · Install the agent on the worker machine</div>
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3 space-y-3">
+        <div className="label-overline">Step 1 · Pick the worker's GPU vendor</div>
         <p className="text-[0.75rem] text-[var(--hud-text-muted)]">
-          Run this command on the worker. It pulls the agent image, generates a random
-          authentication token (already filled below), and exposes the agent's discovery API on
-          port <span className="font-mono">9443</span>.
+          Each vendor needs its own PyTorch build, so we ship three images. Selecting one here
+          switches the installer to the matching tag.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {(Object.keys(VENDOR_DETAILS) as Vendor[]).map((v) => {
+            const sel = vendor === v;
+            return (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setVendor(v)}
+                className={`text-left border p-2 transition-colors ${
+                  sel
+                    ? 'border-[var(--hud-accent)] bg-[var(--hud-inset)]'
+                    : 'border-[var(--hud-border-subtle)] hover:border-[var(--hud-border-default)]'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-block w-2 h-2 ${
+                      sel ? 'bg-[var(--hud-accent)]' : 'bg-[var(--hud-border-default)]'
+                    }`}
+                  />
+                  <span className="text-xs font-semibold text-[var(--hud-text-primary)]">
+                    {VENDOR_DETAILS[v].label}
+                  </span>
+                </div>
+                <div className="font-mono text-[0.6875rem] text-[var(--hud-text-muted)] mt-1 truncate">
+                  {VENDOR_DETAILS[v].image}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[0.6875rem] text-[var(--hud-text-muted)]">
+          {VENDOR_DETAILS[vendor].hint}
+        </p>
+      </div>
+
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3 space-y-2">
+        <div className="label-overline">Step 2 · Run the installer on the worker machine</div>
+        <p className="text-[0.75rem] text-[var(--hud-text-muted)]">
+          Paste this one-liner into a shell on the worker. The script pulls{' '}
+          <span className="font-mono">{VENDOR_DETAILS[vendor].image}</span>, generates a random
+          agent token (embedded below), and starts the container with the correct GPU flags for{' '}
+          {vendor}.
         </p>
         <pre className="bg-[var(--hud-inset)] border border-[var(--hud-border-subtle)] p-3 text-[0.6875rem] font-mono whitespace-pre-wrap break-all text-[var(--hud-text-data)]">
-          {installCmd}
+          {curlOneLiner}
         </pre>
         <p className="text-[0.6875rem] text-[var(--hud-text-muted)]">
           The agent stays in <span className="font-mono">unadopted</span> mode until you complete
-          Step 2; before then it accepts no jobs.
+          Step 3 — it accepts no jobs until then.
         </p>
       </div>
 
@@ -198,7 +267,7 @@ export default function ClustersNew() {
         onSubmit={onSubmit}
         className="space-y-3 border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3"
       >
-        <div className="label-overline">Step 2 · Register the cluster</div>
+        <div className="label-overline">Step 3 · Register the cluster</div>
         <div>
           <label className="label-overline block mb-1">Name</label>
           <Input

@@ -238,9 +238,26 @@ VisionForge can dispatch training, evaluation, and ONNX export jobs to **registe
 
 Registration is **discovery-based**: you install a `vf-agent` Docker container on the worker, and the platform reaches out to it to auto-detect hardware. No manual spec entry.
 
-### Step 1 · Install the agent on the worker
+### Step 1 · Pick the worker's GPU vendor and run the installer
 
-Run this on the worker machine. The UI at **`/clusters/new`** generates the exact command for you (with a freshly-randomised token), but the shape is:
+The agent ships as **three images**, one per GPU toolchain, because each needs a different PyTorch build:
+
+| Vendor | Image tag | Base image |
+|---|---|---|
+| `nvidia` | `visionforge/agent:nvidia` | `pytorch/pytorch:2.10.0-cuda13.0-cudnn9-devel` |
+| `rocm` | `visionforge/agent:rocm` | `rocm/pytorch:rocm7.2.3_ubuntu24.04_py3.12_pytorch_release_2.10.0` |
+| `cpu` | `visionforge/agent:cpu` | `python:3.11-slim` |
+
+The UI at **`/clusters/new`** asks you to pick the vendor and then shows a single `curl | bash` command (with a freshly-randomised token). The platform hosts the installer at `GET /api/agents/install.sh`:
+
+```bash
+curl -fsSL https://<platform>/api/agents/install.sh \
+  | VF_AGENT_TOKEN=<random-secret> VF_VENDOR=nvidia bash
+```
+
+The script pulls the matching image, picks the correct GPU flags (`--gpus all` for NVIDIA; `/dev/kfd` + `/dev/dri` + `video`/`render` groups for ROCm; none for CPU), and starts the container with a persistent `vf-agent-state` volume. Override the host port with `VF_AGENT_PORT`, the image with `VF_AGENT_IMAGE`, or pass `REDIS_URL` through to the agent.
+
+If you prefer to run `docker run` by hand, the equivalent for NVIDIA is:
 
 ```bash
 docker run -d --name vf-agent \
@@ -250,7 +267,7 @@ docker run -d --name vf-agent \
   -v vf-agent-state:/var/lib/vf-agent \
   -e VF_AGENT_TOKEN=<random-secret> \
   -e REDIS_URL=redis://<platform-host>:6379/0 \
-  visionforge/agent:latest
+  visionforge/agent:nvidia
 ```
 
 The agent exposes:
@@ -273,9 +290,9 @@ At `/clusters/new`, enter:
 - **Port** — `9443` by default.
 - **Workload kind** — `train`, `eval`, or `both`.
 
-The agent token from Step 1 is pre-filled. On submit, the backend calls `GET /info` on the agent, creates the `Cluster` row populated from the response, then calls `POST /adopt` so the agent knows its `cluster_id`. The agent immediately starts a Celery worker subscribed to `cluster.{cluster_id}` and a heartbeat loop targeting the platform.
+The agent token and the vendor you picked in Step 1 are sent automatically. On submit, the backend calls `GET /info` on the agent, **verifies the agent's reported `gpu_vendor` matches the vendor you selected**, creates the `Cluster` row populated from the response, then calls `POST /adopt` so the agent knows its `cluster_id`. The agent immediately starts a Celery worker subscribed to `cluster.{cluster_id}` and a heartbeat loop targeting the platform.
 
-If the agent is unreachable, the API returns **`502 Bad Gateway`** with `[reason=connect|timeout|auth|bad_response]` appended to the detail; the UI surfaces a matching hint (e.g. "agent rejected the token").
+If the agent is unreachable, the API returns **`502 Bad Gateway`** with `[reason=connect|timeout|auth|bad_response]` appended to the detail; the UI surfaces a matching hint (e.g. "agent rejected the token"). A `[reason=vendor_mismatch]` means you installed the wrong vendor image for that box — reinstall using the image the agent actually reports.
 
 ### Selection rules
 
@@ -312,14 +329,14 @@ If a selected cluster is no longer available at launch time, the relevant endpoi
 
 ### Local development
 
-To run the agent on the same Docker network as the platform for testing:
+To run the agent on the same Docker network as the platform for testing (the overlay builds the `cpu` image so it works on any host):
 
 ```bash
 VF_AGENT_TOKEN=dev-agent-token \
   docker compose -f docker-compose.yml -f compose.agent.yml up -d agent
 ```
 
-Then at `/clusters/new` use host `agent`, port `9443`, token `dev-agent-token`.
+Then at `/clusters/new` pick the **CPU** vendor, and use host `agent`, port `9443`.
 
 ### Security
 

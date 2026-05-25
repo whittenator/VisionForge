@@ -152,6 +152,19 @@ def discover_cluster(
         client=client,
     )
 
+    # If the operator told us in the wizard which vendor image they installed,
+    # enforce it. A mismatch means they ran the wrong installer for this box —
+    # routing GPU-vendor-specific jobs to it would silently fail at training
+    # time, so fail loudly here instead.
+    if payload.gpu_vendor and payload.gpu_vendor != info.gpu_vendor:
+        raise AgentUnreachableError(
+            "vendor_mismatch",
+            f"agent reports gpu_vendor='{info.gpu_vendor}' but wizard selected "
+            f"'{payload.gpu_vendor}'. Reinstall the agent using the "
+            f"'{info.gpu_vendor}' image (or re-run the wizard with the matching "
+            "vendor selected).",
+        )
+
     os_meta = info.os or {}
     create_payload = ClusterCreate(
         name=payload.name,
