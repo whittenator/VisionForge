@@ -37,6 +37,12 @@ interface Cluster {
   active_job_id?: string | null;
   last_heartbeat_at?: string | null;
   gpus: Gpu[];
+  agent_host?: string | null;
+  agent_port?: number | null;
+  agent_version?: string | null;
+  os_name?: string | null;
+  os_release?: string | null;
+  arch?: string | null;
 }
 
 const REFRESH_MS = 5000;
@@ -155,6 +161,17 @@ function ClusterCard({ c }: { c: Cluster }) {
       )}
 
       <div className="flex items-center justify-between text-[0.6875rem] font-mono text-[var(--hud-text-muted)] pt-1 border-t border-[var(--hud-border-subtle)]">
+        <span className="truncate">
+          {c.os_name ? `${c.os_name} ${c.os_release || ''} · ${c.arch || ''}` : 'OS unknown'}
+        </span>
+        {c.agent_host && (
+          <span className="text-[var(--hud-text-data)]">
+            {c.agent_host}:{c.agent_port}
+            {c.agent_version ? ` · v${c.agent_version}` : ''}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center justify-between text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">
         <span>HEARTBEAT · {heartbeatAgo}</span>
         {c.active_job_id && (
           <span className="text-[var(--hud-info-text)]">JOB · {c.active_job_id.slice(0, 8)}</span>

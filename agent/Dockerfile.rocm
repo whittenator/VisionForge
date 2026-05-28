@@ -1,0 +1,36 @@
+FROM rocm/pytorch:rocm7.2.3_ubuntu24.04_py3.12_pytorch_release_2.10.0
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src:/agent/src \
+    DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# rocm-smi is already in the base image. curl + ca-certificates ensure the
+# heartbeat client has trust roots when posting back to the platform.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Backend deps. Torch + torchvision come from the base image as ROCm builds —
+# crucial, because pypi torchvision is CUDA-flavoured and would break GPU ops.
+# `torch>=2.3` from requirements.txt is satisfied by the 2.10 ROCm build, so
+# pip leaves it alone. Ultralytics / open-clip-torch reuse the existing wheels.
+COPY backend/requirements.txt /tmp/req.backend.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r /tmp/req.backend.txt
+
+COPY backend /app
+
+# Agent-only deps. pynvml is shipped but no-ops on AMD — vf_agent.discover
+# falls through to rocm-smi when NVML is unavailable.
+COPY agent/requirements.txt /agent/requirements.txt
+RUN pip install --no-cache-dir -r /agent/requirements.txt
+COPY agent /agent
+
+RUN mkdir -p /var/lib/vf-agent && chmod 700 /var/lib/vf-agent
+
+EXPOSE 9443
+
+ENTRYPOINT ["python", "-m", "vf_agent.main"]

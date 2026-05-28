@@ -1,0 +1,39 @@
+# Local-dev overlay: runs a cluster agent alongside the platform.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f compose.agent.yml up -d agent
+#
+# Then in the UI: /clusters/new
+#   - Host:        agent           (or the host IP if calling from outside Docker)
+#   - Port:        9443
+#   - Agent token: value of VF_AGENT_TOKEN below
+#
+# In production the agent runs on the worker machine, not in this compose file.
+services:
+  agent:
+    # Default to the CPU variant for local-dev so the overlay builds on any host.
+    # On a worker with a GPU you'd run the production image directly:
+    #   docker run ... visionforge/agent:nvidia    (or :rocm)
+    build:
+      context: .
+      dockerfile: agent/Dockerfile.cpu
+    environment:
+      VF_AGENT_TOKEN: ${VF_AGENT_TOKEN:-dev-agent-token}
+      VF_AGENT_PORT: "9443"
+      VF_AGENT_HEARTBEAT_INTERVAL: "30"
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET:-visionforge}
+    ports:
+      - "9443:9443"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - vf_agent_state:/var/lib/vf-agent
+
+volumes:
+  vf_agent_state:

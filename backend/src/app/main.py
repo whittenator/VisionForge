@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy.orm import Session
 
+from app.api.agents import router as agents_router
 from app.api.al import router as al_router
 from app.api.artifacts import router as artifacts_router
 from app.api.auth import router as auth_router
@@ -126,6 +127,7 @@ app.include_router(jobs_router)
 app.include_router(experiments_router)
 app.include_router(artifacts_router)
 app.include_router(clusters_router)
+app.include_router(agents_router)
 app.include_router(evaluations_router)
 
 # New feature routers (conditionally registered based on availability)

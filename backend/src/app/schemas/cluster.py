@@ -22,6 +22,13 @@ class GpuInfo(BaseModel):
 
 
 class ClusterCreate(BaseModel):
+    """Internal-only creation payload used by the discovery service.
+
+    The public API does not accept manually-entered hardware specs anymore;
+    clients should call POST /api/clusters/discover instead, which probes the
+    agent and fills these fields from the agent's /info response.
+    """
+
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     kind: ClusterKind = "both"
@@ -32,6 +39,49 @@ class ClusterCreate(BaseModel):
     gpu_count: int = 0
     gpu_model: str | None = None
     gpu_memory_mb: int = 0
+    agent_host: str | None = None
+    agent_port: int | None = None
+    agent_version: str | None = None
+    os_name: str | None = None
+    os_release: str | None = None
+    arch: str | None = None
+
+
+class ClusterDiscoverRequest(BaseModel):
+    """Operator-supplied tuple used to reach a running agent on the worker.
+
+    `gpu_vendor` records the operator's selection in the wizard (which image
+    they installed). When set, the backend enforces it against the agent's
+    own report at `/info` and rejects the discovery if they disagree.
+    """
+
+    name: str = Field(..., min_length=1, max_length=255)
+    host: str = Field(..., min_length=1, max_length=255)
+    port: int = Field(9443, ge=1, le=65535)
+    agent_token: str = Field(..., min_length=1)
+    kind: ClusterKind = "both"
+    description: str | None = None
+    scheme: Literal["http", "https"] = "http"
+    gpu_vendor: GpuVendor | None = None
+
+
+class AgentInfo(BaseModel):
+    """Schema for the JSON returned by the agent's `/info` endpoint."""
+
+    cpu_cores: int = 0
+    ram_total_mb: int = 0
+    disk_total_gb: int = 0
+    gpu_vendor: GpuVendor = "cpu"
+    gpu_count: int = 0
+    gpu_model: str | None = None
+    gpu_memory_mb: int = 0
+    gpus: list[GpuInfo] = Field(default_factory=list)
+    cpu_usage_pct: float = 0.0
+    ram_used_mb: int = 0
+    disk_used_gb: int = 0
+    gpu_usage_pct: float = 0.0
+    os: dict[str, Any] = Field(default_factory=dict)
+    agent_version: str | None = None
 
 
 class ClusterUpdate(BaseModel):
@@ -93,6 +143,13 @@ class Cluster(BaseModel):
     created_at: datetime | None = None
 
     gpus: list[GpuInfo] = Field(default_factory=list)
+
+    agent_host: str | None = None
+    agent_port: int | None = None
+    agent_version: str | None = None
+    os_name: str | None = None
+    os_release: str | None = None
+    arch: str | None = None
 
 
 class ClusterRegistration(Cluster):
@@ -161,4 +218,10 @@ def cluster_to_dict(model: Any) -> dict[str, Any]:
         "last_heartbeat_at": model.last_heartbeat_at,
         "created_at": model.created_at,
         "gpus": gpus,
+        "agent_host": getattr(model, "agent_host", None),
+        "agent_port": getattr(model, "agent_port", None),
+        "agent_version": getattr(model, "agent_version", None),
+        "os_name": getattr(model, "os_name", None),
+        "os_release": getattr(model, "os_release", None),
+        "arch": getattr(model, "arch", None),
     }

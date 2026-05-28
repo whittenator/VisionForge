@@ -15,6 +15,7 @@ VisionForge centralises dataset management, collaborative annotation, model trai
 - [Configuration](#configuration)
 - [Service Endpoints](#service-endpoints)
 - [API Overview](#api-overview)
+- [Compute Clusters](#compute-clusters)
 - [Running Tests](#running-tests)
 - [Linting & Formatting](#linting--formatting)
 - [Database Migrations](#database-migrations)
@@ -33,8 +34,9 @@ VisionForge centralises dataset management, collaborative annotation, model trai
 | **Training** | YOLO model training via Ultralytics, configurable hyperparameters, experiment tracking |
 | **Active Learning** | Uncertainty sampling, high-value sample selection, automated retrain loops |
 | **Model Registry** | Versioned artifacts, staging/production promotion, ONNX export with validation |
+| **Compute Clusters** | Register external worker nodes, live CPU/RAM/disk/GPU telemetry (NVIDIA / AMD ROCm / CPU), pick an idle cluster when launching training or ONNX export |
 | **RBAC** | Workspace-level roles: `viewer`, `annotator`, `developer`, `admin`, `owner` |
-| **Async Jobs** | Celery-backed task queue; frontend polls job status with live progress |
+| **Async Jobs** | Celery-backed task queue with per-cluster routing; frontend polls job status with live progress |
 | **Observability** | Prometheus metrics, Grafana dashboards, structured JSON logs with request IDs |
 | **API-first** | Full REST API under `/api/`; automatable end-to-end via HTTP |
 
@@ -224,8 +226,125 @@ All application routes are prefixed with `/api/`. Authentication routes are unde
 | `/api/al/` | Active learning runs and items |
 | `/api/rbac/` | Role management |
 | `/api/ops/` | Admin / ops utilities |
+| `/api/clusters/` | Compute cluster registration, live telemetry, heartbeat (agent-facing), availability selector |
 
 Full interactive documentation is available at [`/docs`](http://localhost:8000/docs) when the server is running.
+
+---
+
+## Compute Clusters
+
+VisionForge can dispatch training, evaluation, and ONNX export jobs to **registered compute clusters** (external worker nodes) rather than running everything on the API host. The `/clusters` page shows a live grid with per-cluster CPU, RAM, disk and GPU telemetry, OS info, and agent version. The training, evaluation, and ONNX export wizards include a cluster picker grouped by Available / Unavailable.
+
+Registration is **discovery-based**: you install a `vf-agent` Docker container on the worker, and the platform reaches out to it to auto-detect hardware. No manual spec entry.
+
+### Step 1 · Pick the worker's GPU vendor and run the installer
+
+The agent ships as **three images**, one per GPU toolchain, because each needs a different PyTorch build:
+
+| Vendor | Image tag | Base image |
+|---|---|---|
+| `nvidia` | `visionforge/agent:nvidia` | `pytorch/pytorch:2.10.0-cuda13.0-cudnn9-devel` |
+| `rocm` | `visionforge/agent:rocm` | `rocm/pytorch:rocm7.2.3_ubuntu24.04_py3.12_pytorch_release_2.10.0` |
+| `cpu` | `visionforge/agent:cpu` | `python:3.11-slim` |
+
+The UI at **`/clusters/new`** asks you to pick the vendor and then shows a single `curl | bash` command (with a freshly-randomised token). The platform hosts the installer at `GET /api/agents/install.sh`:
+
+```bash
+curl -fsSL https://<platform>/api/agents/install.sh \
+  | VF_AGENT_TOKEN=<random-secret> VF_VENDOR=nvidia bash
+```
+
+The script pulls the matching image, picks the correct GPU flags (`--gpus all` for NVIDIA; `/dev/kfd` + `/dev/dri` + `video`/`render` groups for ROCm; none for CPU), and starts the container with a persistent `vf-agent-state` volume. Override the host port with `VF_AGENT_PORT`, the image with `VF_AGENT_IMAGE`, or pass `REDIS_URL` through to the agent.
+
+If you prefer to run `docker run` by hand, the equivalent for NVIDIA is:
+
+```bash
+docker run -d --name vf-agent \
+  --restart unless-stopped \
+  --gpus all \
+  -p 9443:9443 \
+  -v vf-agent-state:/var/lib/vf-agent \
+  -e VF_AGENT_TOKEN=<random-secret> \
+  -e REDIS_URL=redis://<platform-host>:6379/0 \
+  visionforge/agent:nvidia
+```
+
+The agent exposes:
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /health` | none | Liveness check |
+| `GET /info` | `Bearer $VF_AGENT_TOKEN` | Full hardware + OS snapshot used by discovery |
+| `GET /telemetry` | `Bearer $VF_AGENT_TOKEN` | Live CPU/RAM/disk/GPU usage |
+| `POST /adopt` | `Bearer $VF_AGENT_TOKEN` | Called once by the platform to assign `cluster_id` + `register_token` |
+
+Until adoption, the agent does **not** start its Celery worker — it cannot pick up jobs.
+
+### Step 2 · Register the cluster from the UI
+
+At `/clusters/new`, enter:
+
+- **Name** — display label.
+- **Host** — IP or hostname reachable from the platform.
+- **Port** — `9443` by default.
+- **Workload kind** — `train`, `eval`, or `both`.
+
+The agent token and the vendor you picked in Step 1 are sent automatically. On submit, the backend calls `GET /info` on the agent, **verifies the agent's reported `gpu_vendor` matches the vendor you selected**, creates the `Cluster` row populated from the response, then calls `POST /adopt` so the agent knows its `cluster_id`. The agent immediately starts a Celery worker subscribed to `cluster.{cluster_id}` and a heartbeat loop targeting the platform.
+
+If the agent is unreachable, the API returns **`502 Bad Gateway`** with `[reason=connect|timeout|auth|bad_response]` appended to the detail; the UI surfaces a matching hint (e.g. "agent rejected the token"). A `[reason=vendor_mismatch]` means you installed the wrong vendor image for that box — reinstall using the image the agent actually reports.
+
+### Selection rules
+
+A cluster is **available** when:
+- `enabled = true`
+- `status = online`
+- No `active_job_id` set (i.e., it is idle)
+- Last heartbeat received within `90s`
+- `kind` matches the requested workload (`kind = "both"` matches any)
+
+If a selected cluster is no longer available at launch time, the relevant endpoint returns **`409 Conflict`**.
+
+### API quick reference
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/api/clusters` | user | Full cluster list with telemetry, OS, agent metadata |
+| `GET` | `/api/clusters/available?kind=train\|eval\|both` | user | Filtered list for the selector |
+| `POST` | `/api/clusters/discover` | user | Probe a running agent and register the cluster |
+| `GET` | `/api/clusters/{id}` | user | Single cluster detail |
+| `PATCH` | `/api/clusters/{id}` | user | Update name / description / kind / enabled |
+| `DELETE` | `/api/clusters/{id}` | user | Remove a cluster |
+| `POST` | `/api/clusters/{id}/heartbeat` | **register_token** | Push telemetry (called by the agent) |
+| `POST` | `/api/clusters/{id}/release` | user | Manually release a stuck reservation |
+| `POST` | `/api/clusters/{id}/rotate-token` | user | Issue a new `register_token`; old one is invalidated |
+
+### GPU vendors
+
+| Vendor | Toolchain |
+|---|---|
+| `nvidia` | CUDA / `nvidia-smi` — recommended for YOLO training |
+| `rocm` | AMD ROCm |
+| `cpu` | No GPU — training will run on CPU and is significantly slower |
+
+### Local development
+
+To run the agent on the same Docker network as the platform for testing (the overlay builds the `cpu` image so it works on any host):
+
+```bash
+VF_AGENT_TOKEN=dev-agent-token \
+  docker compose -f docker-compose.yml -f compose.agent.yml up -d agent
+```
+
+Then at `/clusters/new` pick the **CPU** vendor, and use host `agent`, port `9443`.
+
+### Security
+
+The agent's HTTP API is plain HTTP by default; deploy agents on a **private network or VPN**. The `scheme=https` option in the discover request is supported but you are responsible for terminating TLS in front of the agent.
+
+Two tokens are involved:
+- **`VF_AGENT_TOKEN`** — operator-supplied; the platform uses it to talk to the agent (`/info`, `/telemetry`, `/adopt`).
+- **`register_token`** — platform-issued at discovery time; the agent uses it to heartbeat. Rotatable via `POST /api/clusters/{id}/rotate-token`.
 
 ---
 

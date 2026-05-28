@@ -141,6 +141,238 @@ def test_release_returns_cluster_to_online(db):
     assert released.status == "online"
 
 
+def test_discover_probes_agent_and_creates_cluster(db):
+    import httpx
+
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        if request.url.path.endswith("/info"):
+            assert request.headers.get("authorization") == "Bearer agent-secret"
+            return httpx.Response(
+                200,
+                json={
+                    "cpu_cores": 32,
+                    "ram_total_mb": 65536,
+                    "disk_total_gb": 1000,
+                    "gpu_vendor": "nvidia",
+                    "gpu_count": 2,
+                    "gpu_model": "A100 80GB",
+                    "gpu_memory_mb": 81920,
+                    "gpus": [
+                        {"index": 0, "name": "A100", "memory_mb": 81920, "util_pct": 0.0},
+                        {"index": 1, "name": "A100", "memory_mb": 81920, "util_pct": 0.0},
+                    ],
+                    "cpu_usage_pct": 0.0,
+                    "ram_used_mb": 0,
+                    "disk_used_gb": 0,
+                    "gpu_usage_pct": 0.0,
+                    "os": {"name": "Linux", "release": "6.18.5", "arch": "x86_64"},
+                    "agent_version": "0.1.0",
+                },
+            )
+        if request.url.path.endswith("/adopt"):
+            return httpx.Response(200, json={"ok": True})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        from app.schemas.cluster import ClusterDiscoverRequest
+
+        cluster = cluster_service.discover_cluster(
+            db,
+            ClusterDiscoverRequest(
+                name="rig-01",
+                host="10.0.0.10",
+                port=9443,
+                agent_token="agent-secret",
+                kind="both",
+            ),
+            api_url="http://platform:8000",
+            client=client,
+        )
+
+    assert cluster.cpu_cores == 32
+    assert cluster.ram_total_mb == 65536
+    assert cluster.gpu_vendor == "nvidia"
+    assert cluster.gpu_count == 2
+    assert cluster.gpu_model == "A100 80GB"
+    assert cluster.agent_host == "10.0.0.10"
+    assert cluster.agent_port == 9443
+    assert cluster.agent_version == "0.1.0"
+    assert cluster.os_name == "Linux"
+    assert cluster.os_release == "6.18.5"
+    assert cluster.arch == "x86_64"
+    assert cluster.gpus_json and "A100" in cluster.gpus_json
+
+    # Both /info and /adopt were called.
+    paths = [r.url.path for r in captured]
+    assert "/info" in paths
+    assert "/adopt" in paths
+
+
+def test_discover_returns_connect_error_when_agent_down(db):
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("nope", request=request)
+
+    from app.schemas.cluster import ClusterDiscoverRequest
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(cluster_service.AgentUnreachableError) as exc:
+            cluster_service.discover_cluster(
+                db,
+                ClusterDiscoverRequest(
+                    name="x", host="h", port=9443, agent_token="t", kind="both"
+                ),
+                api_url="http://platform:8000",
+                client=client,
+            )
+    assert exc.value.reason == "connect"
+
+
+def test_discover_returns_auth_error_on_401(db):
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": "bad token"})
+
+    from app.schemas.cluster import ClusterDiscoverRequest
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(cluster_service.AgentUnreachableError) as exc:
+            cluster_service.discover_cluster(
+                db,
+                ClusterDiscoverRequest(
+                    name="x", host="h", port=9443, agent_token="wrong", kind="both"
+                ),
+                api_url="http://platform:8000",
+                client=client,
+            )
+    assert exc.value.reason == "auth"
+
+
+def _info_handler(gpu_vendor: str):
+    """Build a MockTransport handler whose /info reports the given vendor."""
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/info"):
+            return httpx.Response(
+                200,
+                json={
+                    "cpu_cores": 8,
+                    "ram_total_mb": 16384,
+                    "disk_total_gb": 256,
+                    "gpu_vendor": gpu_vendor,
+                    "gpu_count": 0 if gpu_vendor == "cpu" else 1,
+                    "gpu_model": None if gpu_vendor == "cpu" else "GPU",
+                    "gpu_memory_mb": 0 if gpu_vendor == "cpu" else 24576,
+                    "gpus": [],
+                    "cpu_usage_pct": 0.0,
+                    "ram_used_mb": 0,
+                    "disk_used_gb": 0,
+                    "gpu_usage_pct": 0.0,
+                    "os": {"name": "Linux", "release": "6.18.5", "arch": "x86_64"},
+                    "agent_version": "0.1.0",
+                },
+            )
+        if request.url.path.endswith("/adopt"):
+            return httpx.Response(200, json={"ok": True})
+        return httpx.Response(404)
+
+    return handler
+
+
+def test_discover_rejects_vendor_mismatch(db):
+    import httpx
+
+    from app.schemas.cluster import ClusterDiscoverRequest
+
+    # Operator selected ROCm in the wizard, but the agent reports NVIDIA.
+    transport = httpx.MockTransport(_info_handler("nvidia"))
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(cluster_service.AgentUnreachableError) as exc:
+            cluster_service.discover_cluster(
+                db,
+                ClusterDiscoverRequest(
+                    name="rig",
+                    host="h",
+                    port=9443,
+                    agent_token="t",
+                    kind="both",
+                    gpu_vendor="rocm",
+                ),
+                api_url="http://platform:8000",
+                client=client,
+            )
+    assert exc.value.reason == "vendor_mismatch"
+    # No cluster row should have been created on rejection.
+    assert cluster_service.list_clusters(db) == []
+
+
+def test_discover_accepts_matching_vendor(db):
+    import httpx
+
+    from app.schemas.cluster import ClusterDiscoverRequest
+
+    transport = httpx.MockTransport(_info_handler("nvidia"))
+    with httpx.Client(transport=transport) as client:
+        cluster = cluster_service.discover_cluster(
+            db,
+            ClusterDiscoverRequest(
+                name="rig",
+                host="h",
+                port=9443,
+                agent_token="t",
+                kind="both",
+                gpu_vendor="nvidia",
+            ),
+            api_url="http://platform:8000",
+            client=client,
+        )
+    assert cluster.gpu_vendor == "nvidia"
+
+
+def test_discover_without_vendor_trusts_agent(db):
+    import httpx
+
+    from app.schemas.cluster import ClusterDiscoverRequest
+
+    # gpu_vendor omitted (backwards-compatible): the agent's report wins.
+    transport = httpx.MockTransport(_info_handler("rocm"))
+    with httpx.Client(transport=transport) as client:
+        cluster = cluster_service.discover_cluster(
+            db,
+            ClusterDiscoverRequest(
+                name="rig", host="h", port=9443, agent_token="t", kind="both"
+            ),
+            api_url="http://platform:8000",
+            client=client,
+        )
+    assert cluster.gpu_vendor == "rocm"
+
+
+def test_rotate_register_token_invalidates_old_token(db):
+    cluster = _create(db)
+    old_token = cluster.register_token
+    rotated = cluster_service.rotate_register_token(db, cluster.id)
+    assert rotated is not None
+    assert rotated.register_token != old_token
+    assert rotated.status == "offline"
+    # Old token now fails heartbeats
+    with pytest.raises(cluster_service.ClusterError):
+        cluster_service.record_heartbeat(
+            db,
+            cluster.id,
+            ClusterHeartbeat(register_token=old_token, status="online"),
+        )
+
+
 def test_stale_heartbeat_treated_as_offline(db):
     cluster = _create(db)
     cluster_service.record_heartbeat(

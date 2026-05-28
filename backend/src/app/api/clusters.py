@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
 from app.models.user import User
 from app.schemas.cluster import Cluster as ClusterSchema
 from app.schemas.cluster import (
-    ClusterCreate,
+    ClusterDiscoverRequest,
     ClusterHeartbeat,
     ClusterHeartbeatAck,
     ClusterRegistration,
@@ -20,6 +21,14 @@ from app.schemas.cluster import (
 from app.services import cluster_service
 
 router = APIRouter(prefix="/api/clusters", tags=["clusters"])
+
+
+def _platform_api_url(request: Request) -> str:
+    """Return the public base URL the agent should heartbeat back to."""
+    override = os.getenv("VF_PLATFORM_PUBLIC_URL")
+    if override:
+        return override.rstrip("/")
+    return str(request.base_url).rstrip("/")
 
 
 @router.get("", response_model=list[ClusterSchema])
@@ -49,13 +58,30 @@ def list_available_clusters(
     return [ClusterSummary(**s) for s in cluster_service.summarize(rows, kind=kind)]
 
 
-@router.post("", response_model=ClusterRegistration, status_code=201)
-def create_cluster(
-    payload: ClusterCreate,
+@router.post("/discover", response_model=ClusterRegistration, status_code=201)
+def discover_cluster(
+    payload: ClusterDiscoverRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    cluster = cluster_service.create_cluster(db, payload)
+    """Reach out to a running agent at host:port, fetch hardware specs, and register the cluster.
+
+    Returns 502 if the agent is unreachable, with `reason` set to one of
+    `connect | timeout | auth | bad_response`.
+    """
+    try:
+        cluster = cluster_service.discover_cluster(
+            db, payload, api_url=_platform_api_url(request)
+        )
+    except cluster_service.AgentUnreachableError as exc:
+        # Encode the reason in the detail string so the frontend (which only sees
+        # `detail`) can distinguish connect / timeout / auth / bad_response.
+        raise HTTPException(
+            status_code=502,
+            detail=f"{exc} [reason={exc.reason}]",
+        ) from exc
+
     data = cluster_to_dict(cluster)
     data["register_token"] = cluster.register_token
     return ClusterRegistration(**data)
@@ -131,3 +157,19 @@ def release(
     if not cluster:
         raise HTTPException(status_code=404, detail="Cluster not found")
     return ClusterSchema(**cluster_to_dict(cluster))
+
+
+@router.post("/{cluster_id}/rotate-token", response_model=ClusterRegistration)
+def rotate_token(
+    cluster_id: str = Path(...),
+    request: Request = None,  # type: ignore[assignment]
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-issue the cluster's register_token. The agent must be re-adopted afterwards."""
+    cluster = cluster_service.rotate_register_token(db, cluster_id)
+    if not cluster:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    data = cluster_to_dict(cluster)
+    data["register_token"] = cluster.register_token
+    return ClusterRegistration(**data)

@@ -1,34 +1,91 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';
 import Alert from '@/components/ui/Alert';
+import Badge from '@/components/ui/Badge';
 import { apiPost } from '@/services/api';
 
-interface RegisteredCluster {
+type Vendor = 'nvidia' | 'rocm' | 'cpu';
+
+interface DiscoveredCluster {
   id: string;
   name: string;
+  cpu_cores: number;
+  ram_total_mb: number;
+  disk_total_gb: number;
+  gpu_vendor: Vendor;
+  gpu_count: number;
+  gpu_model?: string | null;
+  gpu_memory_mb: number;
+  agent_host?: string | null;
+  agent_port?: number | null;
+  agent_version?: string | null;
+  os_name?: string | null;
+  os_release?: string | null;
+  arch?: string | null;
   register_token: string;
 }
 
+function randomToken(): string {
+  // 32-byte URL-safe token, generated client-side so the operator never has
+  // to think one up. The installer passes this through as VF_AGENT_TOKEN.
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+const VENDOR_DETAILS: Record<Vendor, { label: string; image: string; hint: string }> = {
+  nvidia: {
+    label: 'NVIDIA (CUDA)',
+    image: 'visionforge/agent:nvidia',
+    hint: 'Requires the NVIDIA Container Toolkit on the worker. Base image: pytorch/pytorch:2.10.0-cuda13.0-cudnn9-devel.',
+  },
+  rocm: {
+    label: 'AMD (ROCm)',
+    image: 'visionforge/agent:rocm',
+    hint: 'Requires the ROCm 7.2+ kernel module on the worker. Base image: rocm/pytorch:rocm7.2.3_ubuntu24.04_py3.12_pytorch_release_2.10.0.',
+  },
+  cpu: {
+    label: 'CPU only (no GPU)',
+    image: 'visionforge/agent:cpu',
+    hint: 'Training will run on CPU and is much slower. Use this for dev / CI or boxes without a discrete GPU.',
+  },
+};
+
 export default function ClustersNew() {
+  const navigate = useNavigate();
+  const [agentToken] = useState<string>(() => randomToken());
+  const [vendor, setVendor] = useState<Vendor>('nvidia');
   const [form, setForm] = useState({
     name: '',
-    description: '',
+    host: '',
+    port: 9443,
     kind: 'both' as 'train' | 'eval' | 'both',
-    cpu_cores: 8,
-    ram_total_mb: 16384,
-    disk_total_gb: 200,
-    gpu_vendor: 'nvidia' as 'nvidia' | 'rocm' | 'cpu',
-    gpu_count: 1,
-    gpu_model: '',
-    gpu_memory_mb: 24576,
+    description: '',
+    scheme: 'http' as 'http' | 'https',
   });
-  const [registered, setRegistered] = useState<RegisteredCluster | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
+  const [registered, setRegistered] = useState<DiscoveredCluster | null>(null);
+
+  const platformBase = useMemo(
+    () => window.location.origin.replace(':5173', ':8000'),
+    [],
+  );
+
+  // The curl-piped installer is the canonical path: one line, no copy-paste
+  // surface area for typos. It calls back to /api/agents/install.sh on this
+  // platform so future installer changes don't require updating the UI.
+  const curlOneLiner = useMemo(
+    () =>
+      `curl -fsSL ${platformBase}/api/agents/install.sh | VF_AGENT_TOKEN=${agentToken} VF_VENDOR=${vendor} bash`,
+    [platformBase, agentToken, vendor],
+  );
 
   function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -36,49 +93,87 @@ export default function ClustersNew() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim()) {
-      setError('Cluster name is required');
-      return;
-    }
-    setLoading(true);
     setError(null);
+    if (!form.name.trim()) return setError('Cluster name is required');
+    if (!form.host.trim()) return setError('Host (IP or hostname) is required');
+    setLoading(true);
     try {
-      const res = await apiPost<RegisteredCluster>('/api/clusters', form);
+      const res = await apiPost<DiscoveredCluster>('/api/clusters/discover', {
+        name: form.name,
+        host: form.host,
+        port: form.port,
+        agent_token: agentToken,
+        kind: form.kind,
+        description: form.description || undefined,
+        scheme: form.scheme,
+        gpu_vendor: vendor,
+      });
       setRegistered(res);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to register cluster');
+      // The API returns 502 with detail "<message> [reason=<code>]" for
+      // agent-unreachable errors; surface a human-readable hint per code.
+      const raw = err instanceof Error ? err.message : 'Failed to register cluster';
+      const m = raw.match(/\[reason=([a-z_]+)\]/);
+      const hint =
+        m?.[1] === 'connect'
+          ? ' (host or port unreachable)'
+          : m?.[1] === 'timeout'
+            ? ' (agent did not respond in time)'
+            : m?.[1] === 'auth'
+              ? ' (agent rejected the token)'
+              : m?.[1] === 'bad_response'
+                ? ' (agent returned malformed data)'
+                : m?.[1] === 'vendor_mismatch'
+                  ? ` (you selected ${vendor} but the agent reports a different GPU vendor)`
+                  : '';
+      setError(`${raw}${hint}`);
     } finally {
       setLoading(false);
     }
   }
 
   if (registered) {
-    const apiBase = window.location.origin.replace('5173', '8000');
-    const installCmd = `docker run -d --name vf-agent \\
-  --restart unless-stopped \\
-  --gpus all \\
-  -e VF_API_URL=${apiBase} \\
-  -e VF_CLUSTER_ID=${registered.id} \\
-  -e VF_REGISTER_TOKEN=${registered.register_token} \\
-  visionforge/agent:latest`;
     return (
       <div className="max-w-2xl space-y-4">
-        <h1>Cluster registered</h1>
-        <Alert variant="success">
-          Run this command on the worker machine to start the agent. The token below appears only once
-          — save it now.
-        </Alert>
-        <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3">
-          <div className="label-overline mb-2">Cluster ID</div>
-          <div className="font-mono text-xs text-[var(--hud-text-data)] mb-3">{registered.id}</div>
-          <div className="label-overline mb-2">Register token</div>
-          <div className="font-mono text-xs text-[var(--hud-text-data)] break-all mb-3">
-            {registered.register_token}
+        <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] pb-3">
+          <div>
+            <div className="label-overline mb-0.5">// Clusters / Registered</div>
+            <h1>Cluster registered</h1>
           </div>
-          <div className="label-overline mb-2">Agent install command</div>
-          <pre className="bg-[var(--hud-inset)] border border-[var(--hud-border-subtle)] p-3 text-[0.6875rem] font-mono whitespace-pre-wrap break-all text-[var(--hud-text-data)]">
-            {installCmd}
-          </pre>
+        </div>
+        <Alert variant="success">
+          Specs discovered from the agent at {registered.agent_host}:{registered.agent_port}. The
+          agent has been adopted and will start posting heartbeats within {30}s.
+        </Alert>
+        <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3 space-y-3">
+          <div>
+            <div className="label-overline mb-1">Cluster</div>
+            <div className="text-sm text-[var(--hud-text-primary)]">{registered.name}</div>
+            <div className="font-mono text-[0.6875rem] text-[var(--hud-text-data)]">
+              {registered.id}
+            </div>
+          </div>
+          <div>
+            <div className="label-overline mb-1">Discovered hardware</div>
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="info">{registered.cpu_cores} CPU cores</Badge>
+              <Badge variant="info">{(registered.ram_total_mb / 1024).toFixed(1)} GB RAM</Badge>
+              <Badge variant="info">{registered.disk_total_gb} GB disk</Badge>
+              {registered.gpu_count > 0 && (
+                <Badge variant="success">
+                  {registered.gpu_vendor.toUpperCase()} · {registered.gpu_count}× {registered.gpu_model || 'GPU'}
+                </Badge>
+              )}
+              {registered.os_name && (
+                <Badge variant="default">
+                  {registered.os_name} {registered.os_release || ''} · {registered.arch || ''}
+                </Badge>
+              )}
+              {registered.agent_version && (
+                <Badge variant="default">agent v{registered.agent_version}</Badge>
+              )}
+            </div>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button onClick={() => navigate('/clusters')}>Done</Button>
@@ -91,111 +186,152 @@ export default function ClustersNew() {
   }
 
   return (
-    <div className="max-w-xl space-y-4">
+    <div className="max-w-2xl space-y-4">
       <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] pb-3">
         <div>
           <div className="label-overline mb-0.5">// Clusters / New</div>
           <h1>Register Cluster</h1>
+          <p className="text-xs text-[var(--hud-text-muted)] mt-1">
+            VisionForge auto-discovers hardware from a running agent. Pick the worker's GPU
+            vendor, run the install command, then enter the worker's address below.
+          </p>
         </div>
-        <Link to="/clusters" className="text-xs font-mono text-[var(--hud-accent)] hover:underline">
+        <Link
+          to="/clusters"
+          className="text-xs font-mono text-[var(--hud-accent)] hover:underline"
+        >
           ← CLUSTERS
         </Link>
       </div>
 
-      <form onSubmit={onSubmit} className="space-y-3">
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3 space-y-3">
+        <div className="label-overline">Step 1 · Pick the worker's GPU vendor</div>
+        <p className="text-[0.75rem] text-[var(--hud-text-muted)]">
+          Each vendor needs its own PyTorch build, so we ship three images. Selecting one here
+          switches the installer to the matching tag.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {(Object.keys(VENDOR_DETAILS) as Vendor[]).map((v) => {
+            const sel = vendor === v;
+            return (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setVendor(v)}
+                className={`text-left border p-2 transition-colors ${
+                  sel
+                    ? 'border-[var(--hud-accent)] bg-[var(--hud-inset)]'
+                    : 'border-[var(--hud-border-subtle)] hover:border-[var(--hud-border-default)]'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-block w-2 h-2 ${
+                      sel ? 'bg-[var(--hud-accent)]' : 'bg-[var(--hud-border-default)]'
+                    }`}
+                  />
+                  <span className="text-xs font-semibold text-[var(--hud-text-primary)]">
+                    {VENDOR_DETAILS[v].label}
+                  </span>
+                </div>
+                <div className="font-mono text-[0.6875rem] text-[var(--hud-text-muted)] mt-1 truncate">
+                  {VENDOR_DETAILS[v].image}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[0.6875rem] text-[var(--hud-text-muted)]">
+          {VENDOR_DETAILS[vendor].hint}
+        </p>
+      </div>
+
+      <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3 space-y-2">
+        <div className="label-overline">Step 2 · Run the installer on the worker machine</div>
+        <p className="text-[0.75rem] text-[var(--hud-text-muted)]">
+          Paste this one-liner into a shell on the worker. The script pulls{' '}
+          <span className="font-mono">{VENDOR_DETAILS[vendor].image}</span>, generates a random
+          agent token (embedded below), and starts the container with the correct GPU flags for{' '}
+          {vendor}.
+        </p>
+        <pre className="bg-[var(--hud-inset)] border border-[var(--hud-border-subtle)] p-3 text-[0.6875rem] font-mono whitespace-pre-wrap break-all text-[var(--hud-text-data)]">
+          {curlOneLiner}
+        </pre>
+        <p className="text-[0.6875rem] text-[var(--hud-text-muted)]">
+          The agent stays in <span className="font-mono">unadopted</span> mode until you complete
+          Step 3 — it accepts no jobs until then.
+        </p>
+      </div>
+
+      <form
+        onSubmit={onSubmit}
+        className="space-y-3 border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3"
+      >
+        <div className="label-overline">Step 3 · Register the cluster</div>
         <div>
           <label className="label-overline block mb-1">Name</label>
-          <Input value={form.name} onChange={(e) => setField('name', e.target.value)} placeholder="gpu-rig-01" />
+          <Input
+            value={form.name}
+            onChange={(e) => setField('name', e.target.value)}
+            placeholder="gpu-rig-01"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label-overline block mb-1">Host (IP / hostname)</label>
+            <Input
+              value={form.host}
+              onChange={(e) => setField('host', e.target.value)}
+              placeholder="10.0.0.10"
+            />
+          </div>
+          <div>
+            <label className="label-overline block mb-1">Port</label>
+            <Input
+              type="number"
+              min={1}
+              max={65535}
+              value={form.port}
+              onChange={(e) => setField('port', parseInt(e.target.value) || 9443)}
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label-overline block mb-1">Scheme</label>
+            <Select
+              value={form.scheme}
+              onChange={(e) => setField('scheme', e.target.value as typeof form.scheme)}
+            >
+              <option value="http">http (private network)</option>
+              <option value="https">https</option>
+            </Select>
+          </div>
+          <div>
+            <label className="label-overline block mb-1">Workload kind</label>
+            <Select
+              value={form.kind}
+              onChange={(e) => setField('kind', e.target.value as typeof form.kind)}
+            >
+              <option value="both">Training + Evaluation</option>
+              <option value="train">Training only</option>
+              <option value="eval">Evaluation only</option>
+            </Select>
+          </div>
         </div>
         <div>
-          <label className="label-overline block mb-1">Description</label>
+          <label className="label-overline block mb-1">Description (optional)</label>
           <Input
             value={form.description}
             onChange={(e) => setField('description', e.target.value)}
             placeholder="On-prem 2× A100 box"
           />
         </div>
-        <div>
-          <label className="label-overline block mb-1">Workload kind</label>
-          <Select value={form.kind} onChange={(e) => setField('kind', e.target.value as typeof form.kind)}>
-            <option value="both">Training + Evaluation</option>
-            <option value="train">Training only</option>
-            <option value="eval">Evaluation only</option>
-          </Select>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div>
-            <label className="label-overline block mb-1">CPU cores</label>
-            <Input
-              type="number"
-              min={1}
-              value={form.cpu_cores}
-              onChange={(e) => setField('cpu_cores', parseInt(e.target.value) || 0)}
-            />
-          </div>
-          <div>
-            <label className="label-overline block mb-1">RAM (MB)</label>
-            <Input
-              type="number"
-              min={0}
-              value={form.ram_total_mb}
-              onChange={(e) => setField('ram_total_mb', parseInt(e.target.value) || 0)}
-            />
-          </div>
-          <div>
-            <label className="label-overline block mb-1">Disk (GB)</label>
-            <Input
-              type="number"
-              min={0}
-              value={form.disk_total_gb}
-              onChange={(e) => setField('disk_total_gb', parseInt(e.target.value) || 0)}
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label-overline block mb-1">GPU vendor</label>
-            <Select
-              value={form.gpu_vendor}
-              onChange={(e) => setField('gpu_vendor', e.target.value as typeof form.gpu_vendor)}
-            >
-              <option value="nvidia">NVIDIA (CUDA)</option>
-              <option value="rocm">AMD (ROCm)</option>
-              <option value="cpu">CPU only</option>
-            </Select>
-          </div>
-          <div>
-            <label className="label-overline block mb-1">GPU count</label>
-            <Input
-              type="number"
-              min={0}
-              value={form.gpu_count}
-              onChange={(e) => setField('gpu_count', parseInt(e.target.value) || 0)}
-            />
-          </div>
-          <div>
-            <label className="label-overline block mb-1">GPU model</label>
-            <Input
-              value={form.gpu_model}
-              onChange={(e) => setField('gpu_model', e.target.value)}
-              placeholder="A100 80GB / RX 7900 XTX"
-            />
-          </div>
-          <div>
-            <label className="label-overline block mb-1">GPU memory (MB)</label>
-            <Input
-              type="number"
-              min={0}
-              value={form.gpu_memory_mb}
-              onChange={(e) => setField('gpu_memory_mb', parseInt(e.target.value) || 0)}
-            />
-          </div>
-        </div>
 
         {error && <Alert variant="error">{error}</Alert>}
 
         <Button type="submit" disabled={loading}>
-          {loading ? 'Registering…' : 'Register cluster'}
+          {loading ? 'Probing agent…' : 'Discover & register'}
         </Button>
       </form>
     </div>
