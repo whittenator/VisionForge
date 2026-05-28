@@ -93,11 +93,11 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)) -> dict:
         )
     try:
         user = auth_service.register(db, name=req.name, email=str(req.email), password=req.password)
-    except auth_service.EmailAlreadyExistsError:
+    except auth_service.EmailAlreadyExistsError as err:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered",
-        )
+        ) from err
 
     access_token = auth_service.create_access_token(user.id, user.email)
     refresh_token = auth_service.create_refresh_token(user.id)

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from app.models.membership import Membership
 from sqlalchemy.orm import Session
 
-from app.models.membership import Membership
 from app.models.project import Project
 
 

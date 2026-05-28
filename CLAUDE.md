@@ -340,9 +340,22 @@ Tests for the agent live in `agent/tests/` (`pytest agent/tests/`) and use `http
 
 ## Security Notes
 
-- The current password hashing (`SHA256`) is a **placeholder for development only**. Replace with `bcrypt`/`argon2` before any production deployment.
-- Auth tokens follow the pattern `token-{user_id}` — also a placeholder; replace with signed JWTs.
-- CORS origins are hardcoded to localhost — parameterise via environment variable for production.
+- **Password hashing** uses `bcrypt` (work factor 12) via the maintained `bcrypt`
+  library directly — *not* `passlib`, which is unmaintained and raises against
+  `bcrypt>=4.1`. Inputs are truncated to bcrypt's 72-byte limit in
+  `services/auth.py`. Legacy SHA-256 hashes are rejected at login; affected users
+  must reset their password.
+- **Auth tokens** are signed JWTs (HS256) — `create_access_token` /
+  `create_refresh_token` / `decode_token` in `services/auth.py`, signed with
+  `SECRET_KEY`; TTLs from `ACCESS_TOKEN_EXPIRE_MINUTES` / `REFRESH_TOKEN_EXPIRE_DAYS`.
+- **CORS origins** are read from `CORS_ALLOW_ORIGINS` (comma-separated) in
+  `main.py`; defaults to localhost for dev. Set it explicitly in production.
+- **Auth rate limiting**: `auth_rate_limit_middleware` in `api/middleware.py`
+  throttles `/auth/*` per client IP. It is **in-memory / per-process** — back it
+  with Redis before running multiple API replicas.
+- **Remaining hardening before production**: rotate all `change-me` secrets in
+  `.env`; terminate TLS in front of the API and the agents; ship the frontend as
+  a production build (`frontend/Dockerfile.prod`) rather than the Vite dev server.
 
 ---
 

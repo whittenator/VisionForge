@@ -12,7 +12,7 @@ def select_uncertain(scores: Iterable[float], k: int) -> list[int]:
 
 
 def l2(a: list[float], b: list[float]) -> float:
-    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+    return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b, strict=False)))
 
 
 def select_diverse(embeddings: list[list[float]], k: int) -> list[int]:

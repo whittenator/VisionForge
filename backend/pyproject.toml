@@ -50,6 +50,12 @@ select = ["E", "F", "I", "UP", "B"]
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
+# B008: FastAPI's `Depends(...)` in argument defaults is the framework's
+# intended pattern, not a bug.
 "src/app/api/*.py" = ["B008"]
-"src/app/db/migrations/**/*.py" = ["E501"]
-"tests/**/*.py" = ["E501"]
+"src/app/db/deps.py" = ["B008"]
+"src/app/main.py" = ["B008"]
+# E402: alembic's env.py and test bootstrap files configure sys.path / app
+# config before importing application modules.
+"src/app/db/migrations/**/*.py" = ["E501", "E402"]
+"tests/**/*.py" = ["E501", "E402"]
