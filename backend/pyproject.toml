@@ -32,6 +32,10 @@ dependencies = [
 
 [tool.pytest.ini_options]
 addopts = "-q --cov=app --cov-report=term-missing"
+# Put the backend root and src/ on sys.path so tests work under both the
+# `pytest` console script and `python -m pytest`. The root entry lets
+# `from tests.conftest import ...` resolve as a namespace package.
+pythonpath = [".", "src"]
 
 [tool.black]
 line-length = 100
