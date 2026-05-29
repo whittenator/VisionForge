@@ -22,16 +22,16 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            backend/requirements.txt
+            backend/requirements-test.txt
             backend/requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # CPU-only torch keeps the install lean; requirements.txt's
-          # torch>=2.3 is then already satisfied and won't pull the CUDA wheel.
-          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+          # Unit tests don't touch the ML stack (it's imported lazily inside
+          # services), so we install a lightweight set — fast and deterministic.
+          # See backend/requirements-test.txt.
+          pip install -r backend/requirements-test.txt -r backend/requirements-dev.txt
 
       - name: Ruff
         run: ruff check backend/src backend/tests

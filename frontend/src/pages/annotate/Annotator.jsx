@@ -600,7 +600,6 @@ export default function AnnotatorPage() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [neighbors.prev, neighbors.next]);
 
   // -------------------------------------------------------------------------
