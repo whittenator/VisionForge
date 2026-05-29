@@ -4,7 +4,6 @@
 .env
 .env.*
 !.env.example
-.github
 
 # 2) Python
 __pycache__/
@@ -65,4 +64,3 @@ tmp/
 # 7) Misc
 .ipynb_checkpoints/
 .envrc
-.github
