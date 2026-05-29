@@ -73,7 +73,13 @@ def _stub_agent(monkeypatch: pytest.MonkeyPatch, info: dict[str, Any]) -> None:
     monkeypatch.setattr(cluster_service.httpx, "Client", factory)
 
 
-def _discover(monkeypatch: pytest.MonkeyPatch, info_overrides: dict[str, Any] | None = None, *, name_prefix: str = "ci", kind: str = "both") -> dict[str, Any]:
+def _discover(
+    monkeypatch: pytest.MonkeyPatch,
+    info_overrides: dict[str, Any] | None = None,
+    *,
+    name_prefix: str = "ci",
+    kind: str = "both",
+) -> dict[str, Any]:
     _stub_agent(monkeypatch, _info_payload(**(info_overrides or {})))
     r = client.post(
         "/api/clusters/discover",
@@ -90,7 +96,9 @@ def _discover(monkeypatch: pytest.MonkeyPatch, info_overrides: dict[str, Any] | 
 
 
 def test_discover_returns_token_and_populates_specs_from_agent(monkeypatch):
-    body = _discover(monkeypatch, {"gpu_count": 2, "gpu_model": "A100 80GB", "gpu_memory_mb": 81920})
+    body = _discover(
+        monkeypatch, {"gpu_count": 2, "gpu_model": "A100 80GB", "gpu_memory_mb": 81920}
+    )
     assert body["register_token"]
     assert body["status"] == "offline"
     assert body["gpu_vendor"] == "nvidia"
@@ -130,7 +138,9 @@ def test_discover_502s_when_agent_unreachable(monkeypatch):
 
 
 def test_heartbeat_makes_cluster_available_for_training(monkeypatch):
-    body = _discover(monkeypatch, {"gpu_vendor": "rocm", "gpu_count": 1}, name_prefix="ci-train", kind="train")
+    body = _discover(
+        monkeypatch, {"gpu_vendor": "rocm", "gpu_count": 1}, name_prefix="ci-train", kind="train"
+    )
     cluster_id = body["id"]
     token = body["register_token"]
 
@@ -144,7 +154,13 @@ def test_heartbeat_makes_cluster_available_for_training(monkeypatch):
             "disk_used_gb": 10,
             "gpu_usage_pct": 5.0,
             "gpus": [
-                {"index": 0, "name": "MI250", "memory_mb": 65536, "util_pct": 5.0, "mem_used_mb": 1024}
+                {
+                    "index": 0,
+                    "name": "MI250",
+                    "memory_mb": 65536,
+                    "util_pct": 5.0,
+                    "mem_used_mb": 1024,
+                }
             ],
         },
     )

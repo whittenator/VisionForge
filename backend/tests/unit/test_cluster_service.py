@@ -225,9 +225,7 @@ def test_discover_returns_connect_error_when_agent_down(db):
         with pytest.raises(cluster_service.AgentUnreachableError) as exc:
             cluster_service.discover_cluster(
                 db,
-                ClusterDiscoverRequest(
-                    name="x", host="h", port=9443, agent_token="t", kind="both"
-                ),
+                ClusterDiscoverRequest(name="x", host="h", port=9443, agent_token="t", kind="both"),
                 api_url="http://platform:8000",
                 client=client,
             )
@@ -348,9 +346,7 @@ def test_discover_without_vendor_trusts_agent(db):
     with httpx.Client(transport=transport) as client:
         cluster = cluster_service.discover_cluster(
             db,
-            ClusterDiscoverRequest(
-                name="rig", host="h", port=9443, agent_token="t", kind="both"
-            ),
+            ClusterDiscoverRequest(name="rig", host="h", port=9443, agent_token="t", kind="both"),
             api_url="http://platform:8000",
             client=client,
         )

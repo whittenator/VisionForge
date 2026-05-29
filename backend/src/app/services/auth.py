@@ -4,8 +4,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import TypedDict
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,11 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
+# bcrypt work factor. 12 rounds is a sensible production default.
+_BCRYPT_ROUNDS = 12
+# bcrypt only considers the first 72 bytes of the input; longer passwords must be
+# truncated explicitly or modern bcrypt (>=4.1) raises ValueError.
+_BCRYPT_MAX_BYTES = 72
 
 
 class AuthUser(TypedDict):
@@ -31,12 +35,21 @@ class EmailAlreadyExistsError(Exception):
     pass
 
 
+def _truncate(raw: str) -> bytes:
+    """Encode and truncate to bcrypt's 72-byte limit."""
+    return raw.encode("utf-8")[:_BCRYPT_MAX_BYTES]
+
+
 def _hash_password(raw: str) -> str:
-    return _pwd_context.hash(raw)
+    hashed = bcrypt.hashpw(_truncate(raw), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS))
+    return hashed.decode("utf-8")
 
 
 def _verify_password(raw: str, hashed: str) -> bool:
-    return _pwd_context.verify(raw, hashed)
+    try:
+        return bcrypt.checkpw(_truncate(raw), hashed.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
 
 
 def _is_bcrypt_hash(hashed: str) -> bool:

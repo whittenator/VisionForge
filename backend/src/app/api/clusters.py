@@ -71,9 +71,7 @@ def discover_cluster(
     `connect | timeout | auth | bad_response`.
     """
     try:
-        cluster = cluster_service.discover_cluster(
-            db, payload, api_url=_platform_api_url(request)
-        )
+        cluster = cluster_service.discover_cluster(db, payload, api_url=_platform_api_url(request))
     except cluster_service.AgentUnreachableError as exc:
         # Encode the reason in the detail string so the frontend (which only sees
         # `detail`) can distinguish connect / timeout / auth / bad_response.

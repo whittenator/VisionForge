@@ -32,6 +32,10 @@ dependencies = [
 
 [tool.pytest.ini_options]
 addopts = "-q --cov=app --cov-report=term-missing"
+# Put the backend root and src/ on sys.path so tests work under both the
+# `pytest` console script and `python -m pytest`. The root entry lets
+# `from tests.conftest import ...` resolve as a namespace package.
+pythonpath = [".", "src"]
 
 [tool.black]
 line-length = 100
@@ -50,6 +54,12 @@ select = ["E", "F", "I", "UP", "B"]
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
+# B008: FastAPI's `Depends(...)` in argument defaults is the framework's
+# intended pattern, not a bug.
 "src/app/api/*.py" = ["B008"]
-"src/app/db/migrations/**/*.py" = ["E501"]
-"tests/**/*.py" = ["E501"]
+"src/app/db/deps.py" = ["B008"]
+"src/app/main.py" = ["B008"]
+# E402: alembic's env.py and test bootstrap files configure sys.path / app
+# config before importing application modules.
+"src/app/db/migrations/**/*.py" = ["E501", "E402"]
+"tests/**/*.py" = ["E501", "E402"]

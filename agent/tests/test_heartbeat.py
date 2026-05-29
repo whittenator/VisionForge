@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -30,8 +32,11 @@ def test_send_once_posts_correct_payload(monkeypatch: pytest.MonkeyPatch) -> Non
     assert captured["url"] == "http://platform:8000/api/clusters/c-1/heartbeat"
     body = captured["json"]
     assert isinstance(body, str)
-    assert '"register_token":"tok"' in body
-    assert '"status":"online"' in body
+    # Parse the JSON rather than substring-matching the serialized form, which
+    # is brittle against httpx/json separator whitespace differences.
+    payload = json.loads(body)
+    assert payload["register_token"] == "tok"
+    assert payload["status"] == "online"
 
 
 def test_send_once_transport_error_returns_zero(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -460,12 +460,29 @@ Migration files live in `backend/src/app/db/migrations/versions/`. On startup, t
 
 ## Security Notes
 
-> The following are **development placeholders** and must be replaced before any production deployment:
->
-> - **Password hashing**: currently SHA-256. Replace with `bcrypt` or `argon2` via `passlib`.
-> - **Auth tokens**: currently `token-{user_id}` strings. Replace with signed JWTs using `python-jose`.
-> - **CORS origins**: hardcoded to localhost. Parameterise via `CORS_ALLOW_ORIGINS` env var and restrict to your actual domain(s).
-> - **Secrets**: rotate all `change-me` values in `.env` before deploying. Never commit `.env` to version control.
+The authentication stack is production-grade:
+
+- **Password hashing**: `bcrypt` (work factor 12), via the maintained `bcrypt`
+  library. Legacy SHA-256 hashes are rejected at login and must be reset.
+- **Auth tokens**: signed JWTs (HS256) with separate access/refresh tokens and
+  configurable TTLs (`ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`).
+- **CORS origins**: configured via the `CORS_ALLOW_ORIGINS` env var
+  (comma-separated). Restrict it to your actual domain(s) — do not leave the
+  localhost defaults in production.
+- **Auth rate limiting**: `/auth/*` endpoints are rate-limited per client IP.
+
+Before going live, you still need to:
+
+- **Rotate all `change-me` secrets** in `.env` (`SECRET_KEY`, DB / MinIO
+  credentials, `SUPERUSER_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`). Never commit
+  `.env`.
+- **Harden the auth rate limiter**: it is currently in-memory (per-process), so
+  it does not coordinate across multiple API replicas. Back it with Redis for a
+  horizontally-scaled deployment.
+- **Terminate TLS** in front of both the API and the cluster agents (the agent
+  HTTP API is plain HTTP by default — keep agents on a private network/VPN).
+- **Build the frontend for production** rather than shipping the Vite dev
+  server (see [`frontend/Dockerfile.prod`](frontend/Dockerfile.prod)).
 
 ---
 

@@ -143,7 +143,7 @@ function HomeDashboard() {
   return (
     <div className="space-y-6">
       <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-6">
-        <div className="label-overline mb-3">// VisionForge · Computer Vision Platform</div>
+        <div className="label-overline mb-3">{'// VisionForge · Computer Vision Platform'}</div>
         <div className="grid gap-6 md:grid-cols-[1fr_auto] items-center">
           <div className="space-y-3">
             <h1 className="text-xl font-semibold tracking-tight text-[var(--hud-text-primary)]">
