@@ -521,6 +521,45 @@ def train_task(payload: dict) -> dict:
                     # Log but don't fail the task
                     epoch_metrics.append({"warning": f"model upload failed: {upload_err}"})
 
+            # Upload Ultralytics-generated plots (PR curve, confusion matrix,
+            # results grid, label distribution) so the UI can render them, and
+            # record a final metric summary. Must run inside the temp-dir block
+            # so the plot files still exist on disk.
+            plot_records: list[dict] = []
+            results_dir = output_dir / "train"
+            if minio_client and results_dir.exists():
+                from app.services import storage as _storage
+
+                for fname in _PLOT_FILES:
+                    fpath = results_dir / fname
+                    if not fpath.exists():
+                        continue
+                    try:
+                        ext = fpath.suffix.lstrip(".").lower()
+                        ctype = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+                        key = f"models/{experiment_id}/plots/{fname}"
+                        _storage.put_bytes(
+                            minio_client,
+                            key,
+                            fpath.read_bytes(),
+                            content_type=ctype,
+                            bucket=bucket,
+                        )
+                        plot_records.append({"name": fpath.stem, "file": fname, "key": key})
+                    except Exception:
+                        continue
+            metrics_blob["plots"] = plot_records
+            if epoch_metrics:
+                metrics_blob["summary"] = {
+                    k: v for k, v in epoch_metrics[-1].items() if k != "epoch"
+                }
+            try:
+                run.metrics_json = json.dumps(metrics_blob)
+                db.add(run)
+                db.commit()
+            except Exception:
+                pass
+
             if job_id:
                 update_job_status(db, job_id, status="running", progress=0.97)
 

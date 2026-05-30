@@ -123,6 +123,29 @@ def get_metrics(
                 split = data.get("split")
         except Exception:
             pass
+
+    # Attach presigned GET urls so the frontend can render plots in <img> tags
+    # without forwarding the auth header (mirrors asset download_url).
+    if plots:
+        plots = [dict(p) for p in plots]
+        try:
+            import os
+            from datetime import timedelta
+
+            from app.services import storage
+
+            client = storage.get_minio_client()
+            bucket = os.getenv("MINIO_BUCKET", os.getenv("S3_BUCKET", "visionforge"))
+            for p in plots:
+                if p.get("key"):
+                    try:
+                        p["url"] = client.presigned_get_object(
+                            bucket, p["key"], expires=timedelta(hours=1)
+                        )
+                    except Exception:
+                        p["url"] = None
+        except Exception:
+            pass
     return {
         "run_id": runId,
         "status": e.status,
