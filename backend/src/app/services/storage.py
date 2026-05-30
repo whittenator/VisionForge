@@ -1,8 +1,43 @@
 from __future__ import annotations
 
+import io
 import os
 
 from minio import Minio
+
+
+def _default_bucket() -> str:
+    return os.getenv("MINIO_BUCKET", os.getenv("S3_BUCKET", "visionforge"))
+
+
+def put_bytes(
+    client: Minio,
+    object_key: str,
+    data: bytes,
+    content_type: str = "application/octet-stream",
+    bucket: str | None = None,
+) -> str:
+    """Upload raw bytes to MinIO and return the object key."""
+    bucket = bucket or _default_bucket()
+    client.put_object(
+        bucket,
+        object_key,
+        io.BytesIO(data),
+        length=len(data),
+        content_type=content_type,
+    )
+    return object_key
+
+
+def get_bytes(client: Minio, object_key: str, bucket: str | None = None) -> bytes:
+    """Fetch an object's bytes from MinIO."""
+    bucket = bucket or _default_bucket()
+    response = client.get_object(bucket, object_key)
+    try:
+        return response.read()
+    finally:
+        response.close()
+        response.release_conn()
 
 
 def get_minio_client() -> Minio:

@@ -26,6 +26,7 @@ def list_assets(
     *,
     version_id: str | None = None,
     label_status: str | None = None,
+    split: str | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> tuple[list[Asset], int]:
@@ -34,6 +35,17 @@ def list_assets(
         q = q.where(Asset.version_id == version_id)
     if label_status:
         q = q.where(Asset.label_status == label_status)
+
+    # The split lives inside the meta_data JSON blob, which is not portably
+    # queryable across SQLite (tests) and Postgres, so filter it in Python.
+    if split:
+        from app.services.split_service import asset_split
+
+        want = split.lower()
+        ordered = q.order_by(Asset.created_at.asc(), Asset.id.asc())
+        matched = [a for a in db.scalars(ordered).all() if asset_split(a) == want]
+        return matched[offset : offset + limit], len(matched)
+
     total = db.scalar(select(func.count()).select_from(q.subquery()))
     assets = list(db.scalars(q.offset(offset).limit(limit)).all())
     return assets, total or 0

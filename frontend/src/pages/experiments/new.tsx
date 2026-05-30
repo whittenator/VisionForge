@@ -6,26 +6,299 @@ import Button from '@/components/ui/Button';
 import Alert from '@/components/ui/Alert';
 import Spinner from '@/components/ui/Spinner';
 import ClusterSelect from '@/components/common/ClusterSelect';
+import SplitPanel, { SplitConfig, DEFAULT_SPLIT } from '@/components/common/SplitPanel';
 import { apiGet, apiPost } from '@/services/api';
 
-interface Project { id: string; name: string; }
-interface Dataset { id: string; name: string; latest_version_id?: string; }
+interface Project {
+  id: string;
+  name: string;
+}
+interface Dataset {
+  id: string;
+  name: string;
+  latest_version_id?: string;
+}
 
 const BASE_MODELS = ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'];
 
-const DEFAULT_AUGMENTATIONS = {
-  hsv_h: 0.015,
-  hsv_s: 0.7,
-  hsv_v: 0.4,
-  degrees: 0.0,
-  translate: 0.1,
-  scale: 0.5,
-  shear: 0.0,
-  flipud: 0.0,
-  fliplr: 0.5,
-  mosaic: 1.0,
-  mixup: 0.0,
-};
+type FieldType = 'number' | 'bool' | 'select';
+interface FieldDef {
+  key: string;
+  label: string;
+  type: FieldType;
+  default: number | boolean | string;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: string[];
+  help?: string;
+}
+
+// Single source of truth for every tunable hyperparameter / augmentation knob.
+// Adding a field here exposes it in the UI and forwards it to the backend.
+const GROUPS: { title: string; fields: FieldDef[] }[] = [
+  {
+    title: 'Core',
+    fields: [
+      { key: 'epochs', label: 'Epochs', type: 'number', default: 50, min: 1, max: 2000 },
+      { key: 'batch', label: 'Batch Size', type: 'number', default: 16, min: 1, max: 512 },
+      {
+        key: 'imgsz',
+        label: 'Image Size',
+        type: 'number',
+        default: 640,
+        min: 32,
+        max: 1920,
+        step: 32,
+      },
+      {
+        key: 'patience',
+        label: 'Patience',
+        type: 'number',
+        default: 100,
+        min: 0,
+        max: 1000,
+        help: 'Early-stop after N epochs w/o improvement',
+      },
+      { key: 'seed', label: 'Seed', type: 'number', default: 0, min: 0 },
+      {
+        key: 'rect',
+        label: 'Rectangular',
+        type: 'bool',
+        default: false,
+        help: 'Rectangular batches (min padding)',
+      },
+      { key: 'single_cls', label: 'Single class', type: 'bool', default: false },
+    ],
+  },
+  {
+    title: 'Optimizer & Schedule',
+    fields: [
+      {
+        key: 'optimizer',
+        label: 'Optimizer',
+        type: 'select',
+        default: 'auto',
+        options: ['auto', 'SGD', 'Adam', 'AdamW', 'NAdam', 'RAdam', 'RMSProp'],
+      },
+      {
+        key: 'lr0',
+        label: 'Initial LR (lr0)',
+        type: 'number',
+        default: 0.01,
+        min: 0.00001,
+        max: 1,
+        step: 0.0001,
+      },
+      {
+        key: 'lrf',
+        label: 'Final LR (lrf)',
+        type: 'number',
+        default: 0.01,
+        min: 0.00001,
+        max: 1,
+        step: 0.0001,
+      },
+      {
+        key: 'momentum',
+        label: 'Momentum',
+        type: 'number',
+        default: 0.937,
+        min: 0,
+        max: 1,
+        step: 0.001,
+      },
+      {
+        key: 'weight_decay',
+        label: 'Weight Decay',
+        type: 'number',
+        default: 0.0005,
+        min: 0,
+        max: 0.1,
+        step: 0.0001,
+      },
+      {
+        key: 'warmup_epochs',
+        label: 'Warmup Epochs',
+        type: 'number',
+        default: 3.0,
+        min: 0,
+        max: 20,
+        step: 0.5,
+      },
+      {
+        key: 'warmup_momentum',
+        label: 'Warmup Momentum',
+        type: 'number',
+        default: 0.8,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      {
+        key: 'warmup_bias_lr',
+        label: 'Warmup Bias LR',
+        type: 'number',
+        default: 0.1,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      { key: 'cos_lr', label: 'Cosine LR', type: 'bool', default: false },
+      {
+        key: 'close_mosaic',
+        label: 'Close Mosaic',
+        type: 'number',
+        default: 10,
+        min: 0,
+        max: 100,
+        help: 'Disable mosaic for last N epochs',
+      },
+      { key: 'nbs', label: 'Nominal Batch', type: 'number', default: 64, min: 1, max: 256 },
+      { key: 'amp', label: 'AMP', type: 'bool', default: true, help: 'Automatic mixed precision' },
+    ],
+  },
+  {
+    title: 'Regularization & Loss Gains',
+    fields: [
+      {
+        key: 'dropout',
+        label: 'Dropout',
+        type: 'number',
+        default: 0.0,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      {
+        key: 'label_smoothing',
+        label: 'Label Smoothing',
+        type: 'number',
+        default: 0.0,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      { key: 'box', label: 'Box Gain', type: 'number', default: 7.5, min: 0, max: 20, step: 0.1 },
+      { key: 'cls', label: 'Cls Gain', type: 'number', default: 0.5, min: 0, max: 10, step: 0.1 },
+      { key: 'dfl', label: 'DFL Gain', type: 'number', default: 1.5, min: 0, max: 10, step: 0.1 },
+      { key: 'overlap_mask', label: 'Overlap Mask', type: 'bool', default: true },
+      { key: 'mask_ratio', label: 'Mask Ratio', type: 'number', default: 4, min: 1, max: 16 },
+    ],
+  },
+  {
+    title: 'Augmentation',
+    fields: [
+      {
+        key: 'hsv_h',
+        label: 'hsv_h',
+        type: 'number',
+        default: 0.015,
+        min: 0,
+        max: 1,
+        step: 0.001,
+        help: 'Hue jitter fraction',
+      },
+      {
+        key: 'hsv_s',
+        label: 'hsv_s',
+        type: 'number',
+        default: 0.7,
+        min: 0,
+        max: 1,
+        step: 0.01,
+        help: 'Saturation jitter',
+      },
+      {
+        key: 'hsv_v',
+        label: 'hsv_v',
+        type: 'number',
+        default: 0.4,
+        min: 0,
+        max: 1,
+        step: 0.01,
+        help: 'Value jitter',
+      },
+      {
+        key: 'degrees',
+        label: 'degrees',
+        type: 'number',
+        default: 0.0,
+        min: 0,
+        max: 180,
+        step: 1,
+        help: 'Rotation range',
+      },
+      {
+        key: 'translate',
+        label: 'translate',
+        type: 'number',
+        default: 0.1,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      { key: 'scale', label: 'scale', type: 'number', default: 0.5, min: 0, max: 1, step: 0.01 },
+      { key: 'shear', label: 'shear', type: 'number', default: 0.0, min: 0, max: 10, step: 0.1 },
+      {
+        key: 'perspective',
+        label: 'perspective',
+        type: 'number',
+        default: 0.0,
+        min: 0,
+        max: 0.001,
+        step: 0.0001,
+      },
+      { key: 'flipud', label: 'flipud', type: 'number', default: 0.0, min: 0, max: 1, step: 0.01 },
+      { key: 'fliplr', label: 'fliplr', type: 'number', default: 0.5, min: 0, max: 1, step: 0.01 },
+      { key: 'bgr', label: 'bgr', type: 'number', default: 0.0, min: 0, max: 1, step: 0.01 },
+      { key: 'mosaic', label: 'mosaic', type: 'number', default: 1.0, min: 0, max: 1, step: 0.01 },
+      { key: 'mixup', label: 'mixup', type: 'number', default: 0.0, min: 0, max: 1, step: 0.01 },
+      {
+        key: 'copy_paste',
+        label: 'copy_paste',
+        type: 'number',
+        default: 0.0,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      {
+        key: 'erasing',
+        label: 'erasing',
+        type: 'number',
+        default: 0.4,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      {
+        key: 'crop_fraction',
+        label: 'crop_fraction',
+        type: 'number',
+        default: 1.0,
+        min: 0,
+        max: 1,
+        step: 0.01,
+      },
+      {
+        key: 'auto_augment',
+        label: 'auto_augment',
+        type: 'select',
+        default: 'randaugment',
+        options: ['randaugment', 'autoaugment', 'augmix'],
+      },
+    ],
+  },
+];
+
+const DEVICES = ['cpu', 'cuda', 'mps', '0', '0,1'];
+
+function buildDefaults(): Record<string, number | boolean | string> {
+  const out: Record<string, number | boolean | string> = {};
+  for (const g of GROUPS) for (const f of g.fields) out[f.key] = f.default;
+  return out;
+}
 
 function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
   return (
@@ -35,31 +308,80 @@ function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.Re
   );
 }
 
+function HpField({
+  field,
+  value,
+  onChange,
+}: {
+  field: FieldDef;
+  value: number | boolean | string;
+  onChange: (v: number | boolean | string) => void;
+}) {
+  if (field.type === 'bool') {
+    return (
+      <label className="flex items-center gap-2 pt-5 text-xs font-mono text-[var(--hud-text-muted)]">
+        <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
+        {field.label}
+      </label>
+    );
+  }
+  if (field.type === 'select') {
+    return (
+      <div>
+        <FieldLabel htmlFor={`hp-${field.key}`}>{field.label}</FieldLabel>
+        <Select
+          id={`hp-${field.key}`}
+          value={String(value)}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {field.options!.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </Select>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <FieldLabel htmlFor={`hp-${field.key}`}>{field.label}</FieldLabel>
+      <Input
+        id={`hp-${field.key}`}
+        type="number"
+        min={field.min}
+        max={field.max}
+        step={field.step ?? 1}
+        value={value as number}
+        onChange={(e) => {
+          const n = parseFloat(e.target.value);
+          onChange(Number.isFinite(n) ? n : (field.default as number));
+        }}
+        title={field.help}
+      />
+    </div>
+  );
+}
+
 export default function ExperimentsNew() {
   const [searchParams] = useSearchParams();
   const preselectedProject = searchParams.get('projectId') || '';
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  const [form, setForm] = useState({
+  const [run, setRun] = useState({
     projectId: preselectedProject,
+    datasetId: '',
     datasetVersionId: '',
     name: 'Baseline',
     task: 'detect',
     baseModel: 'yolov8n.pt',
     clusterId: '',
-    epochs: 50,
-    batchSize: 16,
-    imageSize: 640,
-    learningRate: 0.01,
-    lrf: 0.01,
-    momentum: 0.937,
-    weightDecay: 0.0005,
-    warmupEpochs: 3.0,
     device: 'cpu',
-    augmentations: { ...DEFAULT_AUGMENTATIONS },
   });
-  const [showAugmentations, setShowAugmentations] = useState(false);
+  const [params, setParams] = useState<Record<string, number | boolean | string>>(buildDefaults());
+  const [splitCfg, setSplitCfg] = useState<SplitConfig>(DEFAULT_SPLIT);
+  const [open, setOpen] = useState<Record<string, boolean>>({ Core: true });
   const [loading, setLoading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,43 +394,62 @@ export default function ExperimentsNew() {
   }, []);
 
   useEffect(() => {
-    if (!form.projectId) { setDatasets([]); return; }
-    apiGet<{ items: Dataset[] }>(
-      `/api/datasets?project_id=${form.projectId}&page=1&page_size=200`,
-    )
+    if (!run.projectId) {
+      setDatasets([]);
+      return;
+    }
+    apiGet<{ items: Dataset[] }>(`/api/datasets?project_id=${run.projectId}&page=1&page_size=200`)
       .then((d) => setDatasets(d.items || []))
       .catch(console.error);
-  }, [form.projectId]);
+  }, [run.projectId]);
 
-  function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+  function setParam(key: string, value: number | boolean | string) {
+    setParams((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function resetGroup(title: string) {
+    const group = GROUPS.find((g) => g.title === title);
+    if (!group) return;
+    setParams((prev) => {
+      const next = { ...prev };
+      for (const f of group.fields) next[f.key] = f.default;
+      return next;
+    });
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.projectId) { setError('Select a project'); return; }
-    if (!form.datasetVersionId) { setError('Select a dataset/version'); return; }
+    if (!run.projectId) return setError('Select a project');
+    if (!run.datasetVersionId) return setError('Select a dataset/version');
     setLoading(true);
     setError(null);
     try {
+      // Persist the split first so what we train on matches what we visualize.
+      if (run.datasetId && run.datasetVersionId) {
+        try {
+          await apiPost(
+            `/api/datasets/${run.datasetId}/versions/${run.datasetVersionId}/split`,
+            splitCfg,
+          );
+        } catch {
+          /* training re-resolves deterministically from the same seed/ratios */
+        }
+      }
       const job = await apiPost<{ id: string; status: string }>('/api/train', {
-        projectId: form.projectId,
-        datasetVersionId: form.datasetVersionId,
-        task: form.task,
-        baseModel: form.baseModel,
-        name: form.name,
-        clusterId: form.clusterId || null,
+        projectId: run.projectId,
+        datasetVersionId: run.datasetVersionId,
+        task: run.task,
+        baseModel: run.baseModel,
+        name: run.name,
+        clusterId: run.clusterId || null,
         params: {
-          epochs: form.epochs,
-          batch: form.batchSize,
-          imgsz: form.imageSize,
-          lr0: form.learningRate,
-          lrf: form.lrf,
-          momentum: form.momentum,
-          weight_decay: form.weightDecay,
-          warmup_epochs: form.warmupEpochs,
-          device: form.device,
-          ...form.augmentations,
+          ...params,
+          device: run.device,
+          split_train: splitCfg.train,
+          split_val: splitCfg.val,
+          split_test: splitCfg.test,
+          split_seed: splitCfg.seed,
+          split_stratify: splitCfg.stratify,
         },
       });
       setJobId(job.id);
@@ -136,58 +477,91 @@ export default function ExperimentsNew() {
   }
 
   return (
-    <div className="max-w-xl space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] pb-3">
+    <div className="max-w-2xl space-y-0">
+      <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] pb-3 mb-4">
         <div>
           <div className="label-overline mb-0.5">// Experiments / New</div>
           <h1>New Training Run</h1>
         </div>
-        <Link to="/experiments" className="text-xs font-mono text-[var(--hud-accent)] hover:underline">
+        <Link
+          to="/experiments"
+          className="text-xs font-mono text-[var(--hud-accent)] hover:underline"
+        >
           ← EXPERIMENTS
         </Link>
       </div>
 
-      {/* Form */}
       <form onSubmit={onSubmit} className="space-y-0">
         {/* Run config */}
-        <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
-          <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
-            <div className="h-1.5 w-1.5 bg-[var(--hud-accent)]" />
-            <span className="label-overline">Run Configuration</span>
-          </div>
+        <Section title="Run Configuration" accent>
           <div className="p-4 space-y-3">
             <div>
               <FieldLabel htmlFor="run-name">Run Name</FieldLabel>
-              <Input id="run-name" value={form.name} onChange={(e) => setField('name', e.target.value)} placeholder="Baseline" />
+              <Input
+                id="run-name"
+                value={run.name}
+                onChange={(e) => setRun((r) => ({ ...r, name: e.target.value }))}
+                placeholder="Baseline"
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <FieldLabel htmlFor="project-select">Project</FieldLabel>
-                <Select id="project-select" value={form.projectId} onChange={(e) => { setField('projectId', e.target.value); setField('datasetVersionId', ''); }}>
+                <Select
+                  id="project-select"
+                  value={run.projectId}
+                  onChange={(e) =>
+                    setRun((r) => ({
+                      ...r,
+                      projectId: e.target.value,
+                      datasetId: '',
+                      datasetVersionId: '',
+                    }))
+                  }
+                >
                   <option value="">— select —</option>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
                 </Select>
               </div>
               <div>
                 <FieldLabel htmlFor="dataset-select">Dataset Version</FieldLabel>
-                <Select id="dataset-select" value={form.datasetVersionId} onChange={(e) => setField('datasetVersionId', e.target.value)} disabled={!form.projectId || datasets.length === 0}>
+                <Select
+                  id="dataset-select"
+                  value={run.datasetVersionId}
+                  onChange={(e) => {
+                    const ds = datasets.find(
+                      (d) => (d.latest_version_id || d.id) === e.target.value,
+                    );
+                    setRun((r) => ({
+                      ...r,
+                      datasetVersionId: e.target.value,
+                      datasetId: ds?.id || '',
+                    }));
+                  }}
+                  disabled={!run.projectId || datasets.length === 0}
+                >
                   <option value="">— select —</option>
                   {datasets.map((d) => (
                     <option key={d.id} value={d.latest_version_id || d.id}>
-                      {d.name}{!d.latest_version_id ? ' (no versions)' : ''}
+                      {d.name}
+                      {!d.latest_version_id ? ' (no versions)' : ''}
                     </option>
                   ))}
                 </Select>
-                {form.projectId && datasets.length === 0 && (
-                  <p className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)] mt-1">No datasets found</p>
-                )}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <FieldLabel htmlFor="task-select">Task</FieldLabel>
-                <Select id="task-select" value={form.task} onChange={(e) => setField('task', e.target.value)}>
+                <Select
+                  id="task-select"
+                  value={run.task}
+                  onChange={(e) => setRun((r) => ({ ...r, task: e.target.value }))}
+                >
                   <option value="detect">Object Detection</option>
                   <option value="classify">Classification</option>
                   <option value="segment">Segmentation</option>
@@ -196,134 +570,95 @@ export default function ExperimentsNew() {
               </div>
               <div>
                 <FieldLabel htmlFor="base-model">Base Model</FieldLabel>
-                <Select id="base-model" value={form.baseModel} onChange={(e) => setField('baseModel', e.target.value)}>
-                  {BASE_MODELS.map((m) => <option key={m} value={m}>{m}</option>)}
+                <Select
+                  id="base-model"
+                  value={run.baseModel}
+                  onChange={(e) => setRun((r) => ({ ...r, baseModel: e.target.value }))}
+                >
+                  {BASE_MODELS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
                 </Select>
               </div>
             </div>
+            <div>
+              <FieldLabel htmlFor="device">Device</FieldLabel>
+              <Select
+                id="device"
+                value={run.device}
+                onChange={(e) => setRun((r) => ({ ...r, device: e.target.value }))}
+              >
+                {DEVICES.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
-        </div>
+        </Section>
 
-        {/* Cluster selection */}
-        <div className="border border-t-0 border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
-          <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
-            <div className="h-1.5 w-1.5 bg-[var(--hud-accent)]" />
-            <span className="label-overline">Compute Cluster</span>
+        {/* Dataset split */}
+        <Section title="Dataset Split" accent>
+          <div className="p-4">
+            <SplitPanel
+              datasetId={run.datasetId}
+              versionId={run.datasetVersionId}
+              onConfigChange={setSplitCfg}
+            />
           </div>
+        </Section>
+
+        {/* Cluster */}
+        <Section title="Compute Cluster" accent>
           <div className="p-4 space-y-2">
             <FieldLabel htmlFor="cluster-select">Run on cluster</FieldLabel>
             <ClusterSelect
               id="cluster-select"
               kind="train"
-              value={form.clusterId}
-              onChange={(v) => setField('clusterId', v)}
+              value={run.clusterId}
+              onChange={(v) => setRun((r) => ({ ...r, clusterId: v }))}
               allowAuto
             />
             <p className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">
-              Pick an idle cluster to dedicate this run, or leave on auto-assign to use the shared
-              queue. Busy clusters are listed but disabled.
+              Pick an idle cluster to dedicate this run, or leave on auto-assign. Busy clusters are
+              disabled.
             </p>
           </div>
-        </div>
+        </Section>
 
-        {/* Hyperparameters */}
-        <div className="border border-t-0 border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
-          <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center gap-2">
-            <div className="h-1.5 w-1.5 bg-[var(--hud-border-strong)]" />
-            <span className="label-overline">Hyperparameters</span>
-          </div>
-          <div className="p-4 grid grid-cols-2 gap-3">
-            <div>
-              <FieldLabel htmlFor="epochs">Epochs</FieldLabel>
-              <Input id="epochs" type="number" min={1} max={1000} value={form.epochs} onChange={(e) => setField('epochs', parseInt(e.target.value) || 1)} />
-            </div>
-            <div>
-              <FieldLabel htmlFor="batch-size">Batch Size</FieldLabel>
-              <Input id="batch-size" type="number" min={1} max={512} value={form.batchSize} onChange={(e) => setField('batchSize', parseInt(e.target.value) || 1)} />
-            </div>
-            <div>
-              <FieldLabel htmlFor="image-size">Image Size</FieldLabel>
-              <Input id="image-size" type="number" min={32} max={1280} step={32} value={form.imageSize} onChange={(e) => setField('imageSize', parseInt(e.target.value) || 640)} />
-            </div>
-            <div>
-              <FieldLabel htmlFor="lr">Initial LR (lr0)</FieldLabel>
-              <Input id="lr" type="number" min={0.00001} max={1} step={0.0001} value={form.learningRate} onChange={(e) => setField('learningRate', parseFloat(e.target.value) || 0.01)} />
-            </div>
-            <div>
-              <FieldLabel htmlFor="lrf">Final LR (lrf)</FieldLabel>
-              <Input id="lrf" type="number" min={0.00001} max={1} step={0.0001} value={form.lrf} onChange={(e) => setField('lrf', parseFloat(e.target.value) || 0.01)} />
-            </div>
-            <div>
-              <FieldLabel htmlFor="momentum">Momentum</FieldLabel>
-              <Input id="momentum" type="number" min={0} max={1} step={0.001} value={form.momentum} onChange={(e) => setField('momentum', parseFloat(e.target.value) || 0.937)} />
-            </div>
-            <div>
-              <FieldLabel htmlFor="weight-decay">Weight Decay</FieldLabel>
-              <Input id="weight-decay" type="number" min={0} max={0.1} step={0.0001} value={form.weightDecay} onChange={(e) => setField('weightDecay', parseFloat(e.target.value) || 0.0005)} />
-            </div>
-            <div>
-              <FieldLabel htmlFor="warmup-epochs">Warmup Epochs</FieldLabel>
-              <Input id="warmup-epochs" type="number" min={0} max={10} step={0.5} value={form.warmupEpochs} onChange={(e) => setField('warmupEpochs', parseFloat(e.target.value) || 3)} />
-            </div>
-            <div className="col-span-2">
-              <FieldLabel htmlFor="device">Device</FieldLabel>
-              <Select id="device" value={form.device} onChange={(e) => setField('device', e.target.value)}>
-                <option value="cpu">CPU</option>
-                <option value="cuda">CUDA (GPU)</option>
-                <option value="mps">MPS (Apple Silicon)</option>
-                <option value="0">GPU:0</option>
-                <option value="0,1">GPU:0,1</option>
-              </Select>
-            </div>
-          </div>
-        </div>
-
-        {/* Augmentation */}
-        <div className="border border-t-0 border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
-          <button
-            type="button"
-            onClick={() => setShowAugmentations((v) => !v)}
-            className="w-full border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center justify-between hover:bg-[var(--hud-elevated)] transition-colors"
+        {/* Hyperparameter groups */}
+        {GROUPS.map((g) => (
+          <Section
+            key={g.title}
+            title={g.title}
+            collapsible
+            isOpen={!!open[g.title]}
+            onToggle={() => setOpen((o) => ({ ...o, [g.title]: !o[g.title] }))}
+            onReset={() => resetGroup(g.title)}
           >
-            <div className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 bg-[var(--hud-border-strong)]" />
-              <span className="label-overline">Augmentation Parameters</span>
-            </div>
-            <span className="text-xs font-mono text-[var(--hud-text-muted)]">
-              {showAugmentations ? '▲ COLLAPSE' : '▼ EXPAND'}
-            </span>
-          </button>
-          {showAugmentations && (
-            <div className="p-4 grid grid-cols-2 gap-3">
-              {(Object.keys(DEFAULT_AUGMENTATIONS) as Array<keyof typeof DEFAULT_AUGMENTATIONS>).map((key) => (
-                <div key={key}>
-                  <FieldLabel htmlFor={`aug-${key}`}>{key}</FieldLabel>
-                  <Input
-                    id={`aug-${key}`}
-                    type="number"
-                    min={0}
-                    max={key === 'mosaic' ? 1 : undefined}
-                    step={0.001}
-                    value={form.augmentations[key]}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        augmentations: { ...prev.augmentations, [key]: parseFloat(e.target.value) || 0 },
-                      }))
-                    }
+            {open[g.title] && (
+              <div className="p-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+                {g.fields.map((f) => (
+                  <HpField
+                    key={f.key}
+                    field={f}
+                    value={params[f.key]}
+                    onChange={(v) => setParam(f.key, v)}
                   />
-                </div>
-              ))}
-              <div className="col-span-2 text-[0.6875rem] font-mono text-[var(--hud-text-muted)] border border-[var(--hud-border-subtle)] bg-[var(--hud-inset)] px-3 py-2">
-                Augmentation values follow Ultralytics YOLO conventions. hsv_h/s/v: colour jitter fractions.
-                degrees: rotation range. fliplr/flipud: flip probability. mosaic: mosaic augmentation probability.
-                mixup: MixUp probability.
+                ))}
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </Section>
+        ))}
 
-        {error && <Alert variant="error" className="mt-3">{error}</Alert>}
+        {error && (
+          <Alert variant="error" className="mt-3">
+            {error}
+          </Alert>
+        )}
 
         <div className="pt-3">
           <Button type="submit" disabled={loading} className="w-full">
@@ -338,6 +673,57 @@ export default function ExperimentsNew() {
           </Button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+  accent,
+  collapsible,
+  isOpen,
+  onToggle,
+  onReset,
+}: {
+  title: string;
+  children: React.ReactNode;
+  accent?: boolean;
+  collapsible?: boolean;
+  isOpen?: boolean;
+  onToggle?: () => void;
+  onReset?: () => void;
+}) {
+  return (
+    <div className="border border-t-0 first:border-t border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+      <div className="border-b border-[var(--hud-border-subtle)] px-4 py-2 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={!collapsible}
+          className="flex items-center gap-2 disabled:cursor-default"
+        >
+          <div
+            className={`h-1.5 w-1.5 ${accent ? 'bg-[var(--hud-accent)]' : 'bg-[var(--hud-border-strong)]'}`}
+          />
+          <span className="label-overline">{title}</span>
+          {collapsible && (
+            <span className="text-xs font-mono text-[var(--hud-text-muted)]">
+              {isOpen ? '▲' : '▼'}
+            </span>
+          )}
+        </button>
+        {collapsible && onReset && isOpen && (
+          <button
+            type="button"
+            onClick={onReset}
+            className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)] hover:text-[var(--hud-accent)]"
+          >
+            RESET
+          </button>
+        )}
+      </div>
+      {children}
     </div>
   );
 }
