@@ -87,6 +87,9 @@ export default function AnnotatorPage() {
   const [imageError, setImageError] = useState(false);
   const [scaleFactor, setScaleFactor] = useState(1);
   const [neighbors, setNeighbors] = useState({ prev: null, next: null, index: null, total: 0 });
+  const [datasetName, setDatasetName] = useState('');
+  const [imgDims, setImgDims] = useState({ w: 0, h: 0 });
+  const [showAddClass, setShowAddClass] = useState(false);
   // In-progress polygon: array of points (image coordinates)
   const [polygonInProgress, setPolygonInProgress] = useState([]);
 
@@ -324,6 +327,7 @@ export default function AnnotatorPage() {
         try {
           if (assetData.dataset_id) {
             const dataset = await apiGet(`/api/datasets/${assetData.dataset_id}`);
+            if (dataset?.name) setDatasetName(dataset.name);
             const seeded = Array.isArray(dataset.classes) ? dataset.classes : [];
             const names = seeded
               .map((c) => (typeof c === 'string' ? c : c?.name))
@@ -369,6 +373,7 @@ export default function AnnotatorPage() {
           );
           canvas.width = Math.round(img.naturalWidth * sf);
           canvas.height = Math.round(img.naturalHeight * sf);
+          setImgDims({ w: img.naturalWidth, h: img.naturalHeight });
           setScaleFactor(sf);
           scaleRef.current = sf;
           redraw();
@@ -501,6 +506,8 @@ export default function AnnotatorPage() {
     const imgW = rawW / sf;
     const imgH = rawH / sf;
     if (imgW < 5 || imgH < 5) {
+      // Treat a non-drag as a click: select whatever box is under the cursor.
+      setSelectedAnnotationIdx(hitTestAnnotation(currentX, currentY));
       redraw();
       return;
     }
@@ -776,414 +783,393 @@ export default function AnnotatorPage() {
   const classificationAnn = annotations.find((a) => a.type === 'classification');
   const visibleAnns = annotations.filter((a) => a.type !== 'classification');
 
-  const toolBtn = (label, active, onClick, ariaLabel, hint) => (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={ariaLabel}
-      title={hint}
-      className={[
-        'px-3 h-6 text-[0.6875rem] font-mono tracking-widest border transition-colors',
-        active
-          ? 'bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)] border-[var(--hud-accent)]'
-          : 'bg-transparent text-[var(--hud-text-secondary)] border-[var(--hud-border-default)] hover:border-[var(--hud-border-accent)] hover:text-[var(--hud-accent)]',
-      ].join(' ')}
-    >
-      {label}
-    </button>
-  );
+  // Normalized 0–1 area of a shape, as a percentage of the frame.
+  function annoArea(ann) {
+    const W = imgDims.w || 1;
+    const H = imgDims.h || 1;
+    if (ann.type === 'box') {
+      const { w, h } = ann.geometry;
+      return ((w * h) / (W * H)) * 100;
+    }
+    if (ann.type === 'polygon') {
+      const pts = ann.geometry.points || [];
+      let a = 0;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        a += pts[j].x * pts[i].y - pts[i].x * pts[j].y;
+      }
+      return (Math.abs(a / 2) / (W * H)) * 100;
+    }
+    return 0;
+  }
+
+  const frameNo = (neighbors.index ?? 0) + 1;
+  const frameTotal = neighbors.total || frameNo;
+  const fileName =
+    asset?.filename || asset?.uri?.split('/').pop() || `frame_${frameNo}`;
+  const frameLabel = imgDims.w ? `${fileName} · ${imgDims.w}×${imgDims.h}` : fileName;
+
+  function handleExit() {
+    if (dirty && !window.confirm('You have unsaved changes. Leave anyway?')) return;
+    if (asset?.dataset_id) navigate(`/datasets/${asset.dataset_id}`);
+    else navigate(-1);
+  }
+
+  const TOOLS = [
+    { id: 'box', label: 'BOX', key: 'B' },
+    { id: 'polygon', label: 'POLYGON', key: 'P' },
+    { id: 'keypoint', label: 'KEYPOINT', key: 'K' },
+    { id: 'classify', label: 'CLASSIFY', key: 'C' },
+  ];
+
+  const navBtn =
+    'inline-flex h-7 items-center border border-[var(--hud-border-strong)] px-2.5 font-mono text-[0.6875rem] tracking-wide text-[var(--hud-text-primary)] transition-colors duration-100 hover:border-[var(--hud-border-accent)] hover:bg-[var(--hud-elevated)] disabled:opacity-30 disabled:pointer-events-none';
 
   return (
     <div
-      className="flex flex-col"
-      style={{ height: 'calc(100vh - 90px)', background: 'var(--hud-base)' }}
+      className="fixed inset-0 z-50 flex flex-col bg-[var(--hud-base)] text-[var(--hud-text-primary)]"
       data-testid="annotator-container"
       role="application"
       aria-label="Annotator"
     >
-      {/* Toolbar */}
-      <div
-        className="flex items-center gap-1.5 px-3 border-b flex-wrap flex-shrink-0"
-        style={{
-          height: '36px',
-          borderColor: 'var(--hud-border-default)',
-          background: 'var(--hud-surface)',
-        }}
-      >
-        {toolBtn('BOX', mode === 'box', () => setMode('box'), 'Box mode', 'B')}
-        {toolBtn('POLYGON', mode === 'polygon', () => setMode('polygon'), 'Polygon mode', 'P (Enter to finalize)')}
-        {toolBtn('KEYPOINT', mode === 'keypoint', () => setMode('keypoint'), 'Keypoint mode', 'K')}
-        {toolBtn('CLASSIFY', mode === 'classify', () => setMode('classify'), 'Classify mode', 'C')}
-        {toolBtn('SELECT', mode === 'select', () => setMode('select'), 'Select mode', 'V')}
-
-        <div className="w-px h-4 mx-1" style={{ background: 'var(--hud-border-strong)' }} />
-
-        {toolBtn('UNDO', false, undo, 'Undo', 'Ctrl/Cmd+Z')}
-        {toolBtn('REDO', false, redo, 'Redo', 'Ctrl/Cmd+Shift+Z')}
-
-        <div className="w-px h-4 mx-1" style={{ background: 'var(--hud-border-strong)' }} />
-
-        <button
-          onClick={handleSave}
-          disabled={!dirty}
-          title="Ctrl/Cmd+S"
-          className={[
-            'px-3 h-6 text-[0.6875rem] font-mono tracking-widest border transition-colors',
-            dirty
-              ? 'bg-[var(--hud-success-dim)] text-[var(--hud-success-text)] border-[var(--hud-success)] hover:bg-[var(--hud-success)] hover:text-[oklch(0.10_0.008_240)]'
-              : 'opacity-30 border-[var(--hud-border-default)] text-[var(--hud-text-muted)] cursor-not-allowed',
-          ].join(' ')}
-        >
-          SAVE
-        </button>
-
-        <div className="w-px h-4 mx-1" style={{ background: 'var(--hud-border-strong)' }} />
-
-        {toolBtn('← PREV', false, () => navigateAsset(-1), 'Previous asset', '←')}
-        {toolBtn('NEXT →', false, () => navigateAsset(1), 'Next asset', '→')}
-
-        <span className="ml-2 text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">
-          {neighbors.total > 0 && (
-            <>
-              FRAME{' '}
-              <span data-testid="frame-pos" style={{ color: 'var(--hud-text-data)' }}>
-                {(neighbors.index ?? 0) + 1}/{neighbors.total}
-              </span>
-              {' · '}
-            </>
-          )}
-          ASSET{' '}
-          <span data-testid="asset-id" style={{ color: 'var(--hud-text-data)' }}>
-            {assetId}
-          </span>
+      {/* Offscreen live region — keeps assistive tech + tests informed. */}
+      <div className="sr-only" aria-live="polite">
+        <span data-testid="status">{status}</span>
+        <span data-testid="mode">{mode}</span>
+        <span data-testid="asset-id">{assetId}</span>
+        <span data-testid="frame-pos">
+          {frameNo}/{frameTotal}
         </span>
-
-        {dirty && (
-          <span
-            className="ml-auto text-[0.6875rem] font-mono pulse-active"
-            style={{ color: 'var(--hud-warning-text)' }}
-          >
-            ● UNSAVED
-          </span>
-        )}
       </div>
 
-      {/* Content row */}
-      <div className="flex flex-1 overflow-hidden min-h-0">
-        {/* Left sidebar — Classes */}
-        <div
-          className="flex-shrink-0 flex flex-col gap-1 p-2 overflow-y-auto border-r"
-          style={{
-            width: '160px',
-            background: 'var(--hud-surface)',
-            borderColor: 'var(--hud-border-default)',
-          }}
-        >
-          <p className="label-overline mb-1">Classes</p>
-          {classes.map((cls, i) => (
-            <button
-              key={cls}
-              onClick={() => setSelectedClass(cls)}
-              className="flex items-center gap-2 px-2 py-1 text-[0.75rem] text-left w-full border transition-colors"
-              style={{
-                borderColor:
-                  selectedClass === cls
-                    ? CLASS_COLORS[i % CLASS_COLORS.length]
-                    : 'var(--hud-border-default)',
-                background: selectedClass === cls ? 'var(--hud-elevated)' : 'transparent',
-                color:
-                  selectedClass === cls ? 'var(--hud-text-primary)' : 'var(--hud-text-muted)',
-              }}
-              aria-pressed={selectedClass === cls}
-            >
-              <span
-                className="inline-block w-2 h-2 flex-shrink-0"
-                style={{ background: CLASS_COLORS[i % CLASS_COLORS.length] }}
+      {/* Toolbar */}
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-3.5 py-2">
+        {/* Left — exit + context */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleExit}
+            className="font-mono text-[0.6875rem] tracking-wide text-[var(--hud-text-muted)] transition-colors duration-100 hover:text-[var(--hud-text-primary)]"
+          >
+            ← EXIT
+          </button>
+          <span className="h-4 w-px bg-[var(--hud-border-strong)]" />
+          <span className="label-overline">{'//'} {datasetName || 'dataset'}</span>
+        </div>
+
+        {/* Center — tools */}
+        <div className="flex items-center gap-1.5">
+          {TOOLS.map((t) => {
+            const active = mode === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setMode(t.id)}
+                aria-pressed={active}
+                aria-label={`${t.label} tool`}
+                title={t.key}
+                className={[
+                  'inline-flex h-7 items-center gap-2 border px-2.5 font-mono text-[0.6875rem] tracking-[0.06em] transition-colors duration-100',
+                  active
+                    ? 'border-[var(--hud-accent)] bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)]'
+                    : 'border-[var(--hud-border-default)] bg-transparent text-[var(--hud-text-secondary)] hover:bg-[var(--hud-elevated)] hover:text-[var(--hud-text-primary)]',
+                ].join(' ')}
+              >
+                {t.label}
+                <span
+                  className={[
+                    'inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-[2px] border px-0.5 text-[9px] leading-none',
+                    active
+                      ? 'border-[oklch(0.10_0.008_240/0.4)] text-[oklch(0.10_0.008_240)]'
+                      : 'border-[var(--hud-border-strong)] text-[var(--hud-text-muted)]',
+                  ].join(' ')}
+                >
+                  {t.key}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right — dirty state + save */}
+        <div className="flex items-center gap-3">
+          {dirty ? (
+            <span className="pulse-active font-mono text-[0.6875rem] text-[var(--hud-warning-text)]">
+              ● UNSAVED
+            </span>
+          ) : (
+            <span className="font-mono text-[0.6875rem] text-[var(--hud-success-text)]">
+              ✓ saved
+            </span>
+          )}
+          <button
+            onClick={undo}
+            title="Ctrl/Cmd+Z"
+            className="h-7 border border-transparent px-2.5 font-mono text-[0.6875rem] tracking-wide text-[var(--hud-text-secondary)] transition-colors duration-100 hover:bg-[var(--hud-elevated)] hover:text-[var(--hud-text-primary)]"
+          >
+            UNDO
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!dirty}
+            title="Ctrl/Cmd+S"
+            className={[
+              'h-7 border px-3 font-mono text-[0.6875rem] tracking-wide transition-colors duration-100',
+              dirty
+                ? 'border-[var(--hud-accent)] bg-[var(--hud-accent)] text-[oklch(0.10_0.008_240)] hover:bg-[var(--hud-accent-hover)] hover:border-[var(--hud-accent-hover)]'
+                : 'cursor-not-allowed border-[var(--hud-border-default)] text-[var(--hud-text-muted)] opacity-40',
+            ].join(' ')}
+          >
+            SAVE
+          </button>
+        </div>
+      </div>
+
+      {/* Body — 180 / 1fr / 240 */}
+      <div className="grid min-h-0 flex-1 [grid-template-columns:180px_1fr_240px]">
+        {/* Left — Classes */}
+        <div className="flex min-h-0 flex-col border-r border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+          <div className="border-b border-[var(--hud-border-subtle)] px-3 py-2.5">
+            <span className="label-overline">Classes</span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {classes.map((cls, i) => {
+              const color = CLASS_COLORS[i % CLASS_COLORS.length];
+              const active =
+                mode === 'classify'
+                  ? classificationAnn?.class_name === cls
+                  : selectedClass === cls;
+              return (
+                <button
+                  key={cls}
+                  onClick={() => {
+                    if (mode === 'classify') {
+                      applyClassification(cls);
+                      return;
+                    }
+                    setSelectedClass(cls);
+                    // Reassign the selected shape's class when one is active.
+                    if (selectedAnnotationIdx != null) {
+                      setAnnotationClass(selectedAnnotationIdx, cls);
+                    }
+                  }}
+                  aria-pressed={active}
+                  className={[
+                    'flex w-full items-center gap-2 px-3 py-2 text-left transition-colors duration-100',
+                    active ? 'bg-[var(--hud-accent-dim)]' : 'hover:bg-[var(--hud-elevated)]',
+                  ].join(' ')}
+                  style={{ borderLeft: `2px solid ${active ? color : 'transparent'}` }}
+                >
+                  <span
+                    className="inline-block flex-shrink-0"
+                    style={{ width: 10, height: 10, background: color }}
+                  />
+                  <span
+                    className="flex-1 truncate font-mono text-[11.5px]"
+                    style={{
+                      color: active
+                        ? 'var(--hud-text-primary)'
+                        : 'var(--hud-text-secondary)',
+                    }}
+                  >
+                    {cls}
+                  </span>
+                  <span className="font-mono text-[9px] text-[var(--hud-text-muted)]">
+                    {i + 1}
+                  </span>
+                </button>
+              );
+            })}
+            {mode === 'classify' && classificationAnn && (
+              <p className="px-3 py-2 font-mono text-[0.6875rem] text-[var(--hud-success-text)]">
+                ✓ {classificationAnn.class_name}
+              </p>
+            )}
+          </div>
+          <div className="space-y-2 border-t border-[var(--hud-border-subtle)] p-2">
+            {showAddClass && (
+              <input
+                type="text"
+                autoFocus
+                value={newClassName}
+                onChange={(e) => setNewClassName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') addClass();
+                  else if (e.key === 'Escape') setShowAddClass(false);
+                }}
+                placeholder="class name…"
+                aria-label="New class name"
+                className="w-full border border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-2 py-1 font-mono text-xs text-[var(--hud-text-primary)] focus:outline-none focus:border-[var(--hud-border-accent)] focus:ring-1 focus:ring-[var(--hud-accent)]"
               />
-              <span className="truncate font-mono text-xs">{cls}</span>
-            </button>
-          ))}
-          <div className="mt-2 space-y-1">
-            <input
-              type="text"
-              value={newClassName}
-              onChange={(e) => setNewClassName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addClass()}
-              placeholder="new class…"
-              aria-label="New class name"
-              className="w-full px-2 py-1 text-xs font-mono border focus:outline-none"
-              style={{
-                background: 'var(--hud-inset)',
-                borderColor: 'var(--hud-border-default)',
-                color: 'var(--hud-text-primary)',
-              }}
-            />
+            )}
             <button
-              onClick={addClass}
-              disabled={!newClassName.trim()}
-              className="w-full px-2 py-1 text-[0.6875rem] font-mono border transition-colors disabled:opacity-30"
-              style={{
-                background: 'transparent',
-                borderColor: 'var(--hud-border-default)',
-                color: 'var(--hud-text-muted)',
+              onClick={() => {
+                if (showAddClass) addClass();
+                else setShowAddClass(true);
               }}
+              className="w-full border border-[var(--hud-border-strong)] px-2 py-1 font-mono text-[0.6875rem] tracking-wide text-[var(--hud-text-secondary)] transition-colors duration-100 hover:border-[var(--hud-border-accent)] hover:bg-[var(--hud-elevated)] hover:text-[var(--hud-text-primary)]"
             >
               + ADD CLASS
             </button>
           </div>
+        </div>
 
-          {mode === 'classify' && (
-            <div
-              className="mt-3 border-t pt-2"
-              style={{ borderColor: 'var(--hud-border-default)' }}
-            >
-              <p className="label-overline mb-1">Set class:</p>
-              {classes.map((cls, i) => (
-                <button
-                  key={cls}
-                  onClick={() => applyClassification(cls)}
-                  className="flex items-center gap-2 px-2 py-1 text-xs font-mono text-left w-full mb-1 border transition-colors"
+        {/* Center — canvas + frame nav */}
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div
+            className="relative flex flex-1 items-center justify-center overflow-auto"
+            style={{ background: 'var(--hud-inset)', padding: 24 }}
+          >
+            {!imageError && (
+              <div className="pointer-events-none absolute left-6 top-6 z-10 bg-[oklch(0.10_0.008_240/0.7)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--hud-text-muted)]">
+                {frameLabel}
+              </div>
+            )}
+            {imageError ? (
+              <div
+                className="flex flex-col items-center gap-2"
+                style={{ color: 'var(--hud-text-muted)' }}
+              >
+                <div
+                  className="flex h-24 w-24 items-center justify-center border font-mono text-3xl"
                   style={{
-                    borderColor:
-                      classificationAnn?.class_name === cls
-                        ? CLASS_COLORS[i % CLASS_COLORS.length]
-                        : 'var(--hud-border-default)',
-                    background:
-                      classificationAnn?.class_name === cls
-                        ? 'var(--hud-elevated)'
-                        : 'transparent',
-                    color: 'var(--hud-text-secondary)',
-                    borderLeft: `2px solid ${CLASS_COLORS[i % CLASS_COLORS.length]}`,
+                    background: 'var(--hud-surface)',
+                    borderColor: 'var(--hud-border-default)',
                   }}
                 >
-                  <span className="truncate">{cls}</span>
-                </button>
-              ))}
-              {classificationAnn && (
-                <p
-                  className="text-[0.6875rem] font-mono mt-1"
-                  style={{ color: 'var(--hud-success-text)' }}
-                >
-                  ✓ {classificationAnn.class_name}
-                </p>
-              )}
-            </div>
-          )}
+                  ?
+                </div>
+                <p className="font-mono text-xs">Image could not be loaded</p>
+                <p className="font-mono text-[0.6875rem]">{assetId}</p>
+              </div>
+            ) : (
+              <canvas
+                ref={canvasRef}
+                className={
+                  mode === 'box' || mode === 'polygon' || mode === 'keypoint'
+                    ? 'cursor-crosshair'
+                    : 'cursor-pointer'
+                }
+                style={{
+                  display: 'block',
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  border: '1px solid var(--hud-border-strong)',
+                }}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={() => {
+                  if (drawingRef.current.active) {
+                    drawingRef.current = {
+                      active: false,
+                      startX: 0,
+                      startY: 0,
+                      currentX: 0,
+                      currentY: 0,
+                    };
+                    redraw();
+                  }
+                }}
+                data-testid="annotation-canvas"
+              />
+            )}
+          </div>
 
-          <div
-            className="mt-3 border-t pt-2 text-[0.6875rem] font-mono"
-            style={{ borderColor: 'var(--hud-border-default)', color: 'var(--hud-text-muted)' }}
-          >
-            <p className="label-overline mb-1">Hotkeys</p>
-            <div>B — box</div>
-            <div>P — polygon (Enter)</div>
-            <div>K — keypoint</div>
-            <div>C — classify</div>
-            <div>V — select</div>
-            <div>← / → — frames</div>
-            <div>Ctrl+Z / Y — undo/redo</div>
-            <div>Del — remove</div>
+          {/* Frame nav */}
+          <div className="flex flex-shrink-0 items-center justify-between border-t border-[var(--hud-border-default)] bg-[var(--hud-surface)] px-4 py-2">
+            <button
+              className={navBtn}
+              onClick={() => navigateAsset(-1)}
+              disabled={!neighbors.prev}
+              aria-label="Previous frame"
+            >
+              ← PREV
+            </button>
+            <div className="font-mono text-[0.6875rem] text-[var(--hud-text-muted)]">
+              FRAME <span className="text-[var(--hud-accent)]">{frameNo}</span> / {frameTotal}
+              {' · '}
+              <span className="text-[var(--hud-text-secondary)]">
+                {visibleAnns.length} annotations
+              </span>
+            </div>
+            <button
+              className={navBtn}
+              onClick={() => navigateAsset(1)}
+              disabled={!neighbors.next}
+              aria-label="Next frame"
+            >
+              NEXT →
+            </button>
           </div>
         </div>
 
-        {/* Canvas area */}
-        <div
-          className="flex-1 flex items-center justify-center overflow-auto p-3"
-          style={{ background: 'var(--hud-inset)' }}
-        >
-          {imageError ? (
-            <div
-              className="flex flex-col items-center gap-2"
-              style={{ color: 'var(--hud-text-muted)' }}
-            >
-              <div
-                className="w-24 h-24 flex items-center justify-center text-3xl font-mono border"
-                style={{
-                  background: 'var(--hud-surface)',
-                  borderColor: 'var(--hud-border-default)',
-                }}
-              >
-                ?
-              </div>
-              <p className="text-xs font-mono">Image could not be loaded</p>
-              <p
-                className="text-[0.6875rem] font-mono"
-                style={{ color: 'var(--hud-text-muted)' }}
-              >
-                {assetId}
+        {/* Right — Annotations */}
+        <div className="flex min-h-0 flex-col border-l border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+          <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] px-3 py-2.5">
+            <span className="label-overline">Annotations</span>
+            <span className="font-mono text-[0.6875rem] text-[var(--hud-text-data)]">
+              {visibleAnns.length}
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            {visibleAnns.length === 0 ? (
+              <p className="px-3 py-3 text-[12px] text-[var(--hud-text-muted)]">
+                Drag on the frame to draw a box.
               </p>
+            ) : (
+              annotations.map((ann, idx) => {
+                if (ann.type === 'classification') return null;
+                const color = classColor(ann.class_name, classes);
+                const sel = idx === selectedAnnotationIdx;
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => setSelectedAnnotationIdx(sel ? null : idx)}
+                    role="option"
+                    aria-selected={sel}
+                    className={[
+                      'group flex cursor-pointer items-center gap-2 border-b border-[var(--hud-border-subtle)] px-3 py-2 transition-colors duration-100',
+                      sel ? 'bg-[var(--hud-accent-dim)]' : 'hover:bg-[var(--hud-elevated)]',
+                    ].join(' ')}
+                  >
+                    <span
+                      className="inline-block flex-shrink-0"
+                      style={{ width: 9, height: 9, background: color }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono text-[11.5px] text-[var(--hud-text-primary)]">
+                        {ann.class_name}
+                      </div>
+                      <div className="font-mono text-[9px] text-[var(--hud-text-muted)]">
+                        {annoArea(ann).toFixed(1)}% area
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteAnnotation(idx);
+                      }}
+                      aria-label={`Delete annotation ${idx}`}
+                      title="Delete"
+                      className="px-1 font-mono text-[var(--hud-text-muted)] transition-colors duration-100 hover:text-[var(--hud-danger-text)]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="space-y-1 border-t border-[var(--hud-border-subtle)] px-3 py-2 font-mono text-[10px]">
+            <div className="flex items-center justify-between">
+              <span className="text-[var(--hud-text-muted)]">TOOL</span>
+              <span className="text-[var(--hud-text-accent)]">→ {mode.toUpperCase()}</span>
             </div>
-          ) : (
-            <canvas
-              ref={canvasRef}
-              className={
-                mode === 'box' || mode === 'polygon' || mode === 'keypoint'
-                  ? 'cursor-crosshair'
-                  : mode === 'select'
-                    ? 'cursor-pointer'
-                    : 'cursor-default'
-              }
-              style={{
-                display: 'block',
-                maxWidth: '100%',
-                maxHeight: '100%',
-                border: '1px solid var(--hud-border-default)',
-              }}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={() => {
-                if (drawingRef.current.active) {
-                  drawingRef.current = {
-                    active: false,
-                    startX: 0,
-                    startY: 0,
-                    currentX: 0,
-                    currentY: 0,
-                  };
-                  redraw();
-                }
-              }}
-              data-testid="annotation-canvas"
-            />
-          )}
-        </div>
-
-        {/* Right sidebar — Annotation list */}
-        <div
-          className="flex-shrink-0 flex flex-col gap-0.5 p-2 overflow-y-auto border-l"
-          style={{
-            width: '200px',
-            background: 'var(--hud-surface)',
-            borderColor: 'var(--hud-border-default)',
-          }}
-        >
-          <p className="label-overline mb-1">
-            Annotations <span className="text-[var(--hud-accent)]">{annotations.length}</span>
-          </p>
-
-          {annotations.length === 0 && (
-            <p
-              className="text-[0.6875rem] font-mono"
-              style={{ color: 'var(--hud-text-muted)' }}
-            >
-              No annotations yet.
-            </p>
-          )}
-
-          {annotations.map((ann, idx) => (
-            <div
-              key={idx}
-              onClick={() => {
-                if (ann.type !== 'classification')
-                  setSelectedAnnotationIdx(idx === selectedAnnotationIdx ? null : idx);
-              }}
-              className="flex items-center gap-1 px-2 py-1 text-xs cursor-pointer group border transition-colors"
-              style={{
-                borderColor:
-                  idx === selectedAnnotationIdx ? 'var(--hud-accent)' : 'transparent',
-                background:
-                  idx === selectedAnnotationIdx ? 'var(--hud-elevated)' : 'transparent',
-              }}
-              role="option"
-              aria-selected={idx === selectedAnnotationIdx}
-            >
-              <span
-                className="inline-block w-2 h-2 flex-shrink-0"
-                style={{ background: classColor(ann.class_name, classes) }}
-              />
-              <span
-                className="flex-1 truncate font-mono text-[0.6875rem]"
-                style={{ color: 'var(--hud-text-secondary)' }}
-              >
-                {ann.type.toUpperCase().slice(0, 3)}: {ann.class_name}
-              </span>
-              {ann.type !== 'classification' && idx === selectedAnnotationIdx && (
-                <select
-                  value={ann.class_name}
-                  onChange={(e) => setAnnotationClass(idx, e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label="Change class"
-                  className="text-[0.6875rem] font-mono max-w-[80px] border focus:outline-none"
-                  style={{
-                    background: 'var(--hud-inset)',
-                    borderColor: 'var(--hud-border-default)',
-                    color: 'var(--hud-text-primary)',
-                  }}
-                >
-                  {classes.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteAnnotation(idx);
-                }}
-                className="ml-auto text-[0.6875rem] font-mono opacity-0 group-hover:opacity-100 transition-opacity px-1"
-                style={{ color: 'var(--hud-danger-text)' }}
-                aria-label={`Delete annotation ${idx}`}
-                title="Delete"
-              >
-                ✕
-              </button>
+            <div className="flex items-center justify-between">
+              <span className="text-[var(--hud-text-muted)]">CLASS</span>
+              <span className="truncate text-[var(--hud-text-accent)]">→ {selectedClass}</span>
             </div>
-          ))}
+          </div>
         </div>
-      </div>
-
-      {/* Status bar */}
-      <div
-        className="px-3 flex items-center gap-4 border-t flex-shrink-0"
-        style={{
-          height: '28px',
-          background: 'var(--hud-surface)',
-          borderColor: 'var(--hud-border-default)',
-        }}
-      >
-        <span
-          className="text-[0.6875rem] font-mono"
-          aria-live="polite"
-          data-testid="status"
-          style={{ color: 'var(--hud-text-muted)' }}
-        >
-          {status}
-        </span>
-        <span
-          className="ml-auto text-[0.6875rem] font-mono"
-          style={{ color: 'var(--hud-text-muted)' }}
-        >
-          MODE{' '}
-          <span data-testid="mode" style={{ color: 'var(--hud-text-data)' }}>
-            {mode.toUpperCase()}
-          </span>
-        </span>
-        {scaleFactor !== 1 && (
-          <span
-            className="text-[0.6875rem] font-mono"
-            style={{ color: 'var(--hud-text-muted)' }}
-          >
-            SCALE{' '}
-            <span style={{ color: 'var(--hud-text-data)' }}>
-              {Math.round(scaleFactor * 100)}%
-            </span>
-          </span>
-        )}
-        <span
-          className="text-[0.6875rem] font-mono"
-          style={{ color: 'var(--hud-text-muted)' }}
-        >
-          <span style={{ color: 'var(--hud-text-data)' }}>{visibleAnns.length}</span>{' '}
-          shape{visibleAnns.length !== 1 ? 's' : ''}
-          {classificationAnn && (
-            <span className="ml-2" style={{ color: 'var(--hud-success-text)' }}>
-              ✓ {classificationAnn.class_name}
-            </span>
-          )}
-        </span>
       </div>
     </div>
   );

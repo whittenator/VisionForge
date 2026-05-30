@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
+from app.models.asset import Asset
 from app.models.dataset import ClassMap, Dataset
 from app.models.dataset_version import DatasetVersion
 from app.models.user import User
@@ -26,6 +27,42 @@ from app.services.dataset_service import snapshot_version
 from app.services.project_dataset_service import create_dataset as svc_create_dataset
 
 router = APIRouter(prefix="/api", tags=["datasets"])
+
+# label_status values that count as "annotated" toward coverage.
+_LABELED_STATUSES = ("labeled", "prelabeled")
+
+
+def _coverage_for_version(db: Session, version_id: str | None) -> tuple[float, str]:
+    """Return (coverage_pct, status) for a dataset version.
+
+    Coverage is the share of assets whose ``label_status`` is labeled/prelabeled.
+    The derived status drives the Datasets table badge:
+      - 100% coverage           -> "ready"
+      - 0% coverage             -> "review" (imported / awaiting a pass)
+      - anything in between     -> "annotating"
+    """
+    if not version_id:
+        return 0.0, "ready"
+
+    rows = db.execute(
+        select(Asset.label_status, func.count())
+        .where(Asset.version_id == version_id)
+        .group_by(Asset.label_status)
+    ).all()
+    counts = {status: count for status, count in rows}
+    total = sum(counts.values())
+    if total == 0:
+        return 0.0, "ready"
+
+    labeled = sum(counts.get(s, 0) for s in _LABELED_STATUSES)
+    pct = round(labeled / total * 100, 1)
+    if pct >= 100:
+        status = "ready"
+    elif pct <= 0:
+        status = "review"
+    else:
+        status = "annotating"
+    return pct, status
 
 
 class DatasetCreate(BaseModel):
@@ -73,6 +110,7 @@ def list_datasets(
             .order_by(DatasetVersion.version.desc())
             .limit(1)
         ).first()
+        coverage_pct, status = _coverage_for_version(db, latest_v.id if latest_v else None)
         items.append(
             {
                 "id": d.id,
@@ -83,6 +121,8 @@ def list_datasets(
                 "latest_version": latest_v.version if latest_v else None,
                 "latest_version_id": latest_v.id if latest_v else None,
                 "asset_count": latest_v.asset_count if latest_v else 0,
+                "coverage_pct": coverage_pct,
+                "status": status,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
         )
