@@ -136,7 +136,13 @@ def get_dataset_metrics(db: Session, dataset_id: str, version_id: str | None = N
         return q
 
     def _scope_anns(q):
-        q = q.join(Asset, Annotation.asset_id == Asset.id).where(Asset.dataset_id == dataset_id)
+        # Explicit select_from(Annotation): several callers select only column
+        # expressions (counts), so SQLAlchemy can't infer the join's left side.
+        q = (
+            q.select_from(Annotation)
+            .join(Asset, Annotation.asset_id == Asset.id)
+            .where(Asset.dataset_id == dataset_id)
+        )
         if version_id:
             q = q.where(Asset.version_id == version_id)
         return q
