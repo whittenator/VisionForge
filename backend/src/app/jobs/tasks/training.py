@@ -43,6 +43,103 @@ def _extract_minio_key(uri: str) -> str:
     return uri
 
 
+# Ultralytics emits verbose metric keys (e.g. "metrics/mAP50(B)",
+# "train/box_loss", "lr/pg0"). Map them to clean, stable keys the frontend
+# charts read. Raw keys are preserved alongside these for completeness.
+_METRIC_KEY_MAP = {
+    "metrics/mAP50(B)": "mAP50",
+    "metrics/mAP50-95(B)": "mAP50_95",
+    "metrics/precision(B)": "precision",
+    "metrics/recall(B)": "recall",
+    "train/box_loss": "train_box_loss",
+    "train/cls_loss": "train_cls_loss",
+    "train/dfl_loss": "train_dfl_loss",
+    "val/box_loss": "val_box_loss",
+    "val/cls_loss": "val_cls_loss",
+    "val/dfl_loss": "val_dfl_loss",
+    "lr/pg0": "lr",
+    "metrics/accuracy_top1": "top1",
+    "metrics/accuracy_top5": "top5",
+}
+
+# Allow-list of Ultralytics ``model.train()`` arguments users may tune. Keys not
+# present here are ignored so callers cannot inject unsafe/irrelevant kwargs.
+# (data / project / name / device / plots are handled separately.)
+ULTRALYTICS_TRAIN_ARGS: dict[str, Any] = {
+    # Core
+    "epochs": 50,
+    "imgsz": 640,
+    "batch": 16,
+    "patience": 100,
+    "rect": False,
+    "single_cls": False,
+    "seed": 0,
+    # Optimizer & schedule
+    "optimizer": "auto",
+    "lr0": 0.01,
+    "lrf": 0.01,
+    "momentum": 0.937,
+    "weight_decay": 0.0005,
+    "warmup_epochs": 3.0,
+    "warmup_momentum": 0.8,
+    "warmup_bias_lr": 0.1,
+    "cos_lr": False,
+    "close_mosaic": 10,
+    "nbs": 64,
+    "amp": True,
+    # Regularization / loss gains
+    "dropout": 0.0,
+    "label_smoothing": 0.0,
+    "box": 7.5,
+    "cls": 0.5,
+    "dfl": 1.5,
+    "overlap_mask": True,
+    "mask_ratio": 4,
+    "freeze": None,
+    # Augmentation
+    "hsv_h": 0.015,
+    "hsv_s": 0.7,
+    "hsv_v": 0.4,
+    "degrees": 0.0,
+    "translate": 0.1,
+    "scale": 0.5,
+    "shear": 0.0,
+    "perspective": 0.0,
+    "flipud": 0.0,
+    "fliplr": 0.5,
+    "bgr": 0.0,
+    "mosaic": 1.0,
+    "mixup": 0.0,
+    "copy_paste": 0.0,
+    "erasing": 0.4,
+    "crop_fraction": 1.0,
+    "auto_augment": "randaugment",
+}
+
+# Ultralytics writes these plot images into the run directory when plots=True.
+_PLOT_FILES = [
+    "results.png",
+    "PR_curve.png",
+    "P_curve.png",
+    "R_curve.png",
+    "F1_curve.png",
+    "confusion_matrix.png",
+    "confusion_matrix_normalized.png",
+    "labels.jpg",
+    "BoxPR_curve.png",
+]
+
+
+def _normalize_metrics(raw: dict) -> dict:
+    """Return a metric dict with clean keys mapped in, raw keys preserved."""
+    out: dict[str, Any] = {}
+    for k, v in raw.items():
+        if k in _METRIC_KEY_MAP:
+            out[_METRIC_KEY_MAP[k]] = v
+        out[k] = v
+    return out
+
+
 def _build_yolo_dataset(
     assets: list[Any],
     annotations_by_asset: dict[str, list[Any]],
@@ -51,8 +148,14 @@ def _build_yolo_dataset(
     minio_client: Any,
     bucket: str,
     task_type: str = "detect",
+    splits: dict[str, str] | None = None,
 ) -> Path:
-    """Export assets and annotations to YOLO dataset format and return path to data.yaml."""
+    """Export assets and annotations to YOLO dataset format and return path to data.yaml.
+
+    ``splits`` maps asset id -> "train" | "val" | "test". Test assets are held
+    out entirely (never written) so they are a true unseen set for evaluation.
+    """
+    splits = splits or {}
     images_train = output_dir / "train" / "images"
     images_val = output_dir / "val" / "images"
     labels_train = output_dir / "train" / "labels"
@@ -68,8 +171,11 @@ def _build_yolo_dataset(
 
     class_idx: dict[str, int] = {name: i for i, name in enumerate(class_names)}
 
-    for i, asset in enumerate(assets):
-        split = "val" if i % 5 == 4 else "train"
+    for asset in assets:
+        split = splits.get(asset.id, "train")
+        if split == "test":
+            # Held out — never exported into the training/val set.
+            continue
         ext = Path(asset.uri).suffix or ".jpg"
         img_name = f"{asset.id}{ext}"
 
@@ -231,6 +337,30 @@ def train_task(payload: dict) -> dict:
                             seen.append(ann.class_name)
                 class_names = seen or ["object"]
 
+        # Resolve the train/val/test split for every asset. Honor a split that
+        # was already persisted on the version (via the split endpoint); fall
+        # back to a deterministic, reproducible hash split for any asset that
+        # has none, using the ratios/seed carried in the run params.
+        from app.services.split_service import (
+            DEFAULT_SEED,
+            asset_split,
+            normalize_ratios,
+            resolve_split,
+        )
+
+        ratios = normalize_ratios(
+            params.get("split_train", 0.8),
+            params.get("split_val", 0.2),
+            params.get("split_test", 0.0),
+        )
+        split_seed = int(params.get("split_seed", DEFAULT_SEED))
+        splits: dict[str, str] = {}
+        split_counts = {"train": 0, "val": 0, "test": 0}
+        for a in assets:
+            s = asset_split(a) or resolve_split(a.id, ratios, split_seed)
+            splits[a.id] = s
+            split_counts[s] = split_counts.get(s, 0) + 1
+
         if job_id:
             update_job_status(db, job_id, status="running", progress=0.1)
 
@@ -245,6 +375,19 @@ def train_task(payload: dict) -> dict:
 
         epoch_metrics: list[dict] = []
         best_pt_path: Path | None = None
+        # Single metrics blob persisted throughout the run: per-epoch history,
+        # the resolved split, a final summary, and links to generated plots.
+        metrics_blob: dict[str, Any] = {
+            "epochs": epoch_metrics,
+            "split": {
+                "counts": split_counts,
+                "ratios": {"train": ratios[0], "val": ratios[1], "test": ratios[2]},
+                "seed": split_seed,
+            },
+        }
+        run.metrics_json = json.dumps(metrics_blob)
+        db.add(run)
+        db.commit()
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -261,6 +404,7 @@ def train_task(payload: dict) -> dict:
                 minio_client=minio_client,
                 bucket=bucket,
                 task_type=task_type,
+                splits=splits,
             )
 
             if job_id:
@@ -285,12 +429,12 @@ def train_task(payload: dict) -> dict:
                     if hasattr(trainer, "loss"):
                         loss_val = trainer.loss
                         metrics_dict["loss"] = float(loss_val) if loss_val is not None else None
-                    entry = {"epoch": epoch_num, **metrics_dict}
+                    entry = {"epoch": epoch_num, **_normalize_metrics(metrics_dict)}
                     epoch_metrics.append(entry)
 
-                    # Persist metrics to DB
+                    # Persist metrics to DB (epoch history lives inside the blob)
                     try:
-                        run.metrics_json = json.dumps({"epochs": epoch_metrics})
+                        run.metrics_json = json.dumps(metrics_blob)
                         db.add(run)
                         db.commit()
                     except Exception:
@@ -308,33 +452,20 @@ def train_task(payload: dict) -> dict:
 
                 train_kwargs: dict = {
                     "data": str(data_yaml),
-                    "epochs": total_epochs,
-                    "imgsz": params.get("imgsz", 640),
-                    "batch": params.get("batch", 16),
                     "device": params.get("device", "cpu"),
                     "project": str(output_dir),
                     "name": "train",
-                    # Learning rate hyperparameters
-                    "lr0": params.get("lr0", 0.01),
-                    "lrf": params.get("lrf", 0.01),
-                    "momentum": params.get("momentum", 0.937),
-                    "weight_decay": params.get("weight_decay", 0.0005),
-                    "warmup_epochs": params.get("warmup_epochs", 3.0),
-                    # Augmentation parameters
-                    "hsv_h": params.get("hsv_h", 0.015),
-                    "hsv_s": params.get("hsv_s", 0.7),
-                    "hsv_v": params.get("hsv_v", 0.4),
-                    "degrees": params.get("degrees", 0.0),
-                    "translate": params.get("translate", 0.1),
-                    "scale": params.get("scale", 0.5),
-                    "shear": params.get("shear", 0.0),
-                    "perspective": params.get("perspective", 0.0),
-                    "flipud": params.get("flipud", 0.0),
-                    "fliplr": params.get("fliplr", 0.5),
-                    "mosaic": params.get("mosaic", 1.0),
-                    "mixup": params.get("mixup", 0.0),
-                    "copy_paste": params.get("copy_paste", 0.0),
+                    "plots": True,  # emit PR/confusion/results plots for the UI
                 }
+                # Pull every tunable hyperparameter / augmentation knob from the
+                # allow-list, taking the user's value when present and the
+                # Ultralytics default otherwise. `epochs` stays bound to
+                # total_epochs so progress reporting matches.
+                for key, default in ULTRALYTICS_TRAIN_ARGS.items():
+                    val = params.get(key, default)
+                    if val is not None:
+                        train_kwargs[key] = val
+                train_kwargs["epochs"] = total_epochs
                 model.train(**train_kwargs)
 
                 # Locate best.pt

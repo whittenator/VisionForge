@@ -22,6 +22,7 @@ class Experiment(BaseModel):
     dataset_version_id: str | None = None
     params_json: str | None = None
     metrics_json: str | None = None
+    artifacts: str | None = None
     status: str
     code_hash: str | None = None
     started_at: datetime | None = None

@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
 from app.models.user import User
+from app.schemas.split import SplitConfig, SplitSummary
+from app.services import split_service
 from app.services.annotation_service import get_asset_annotations
 from app.services.asset_service import (
     confirm_upload,
@@ -102,6 +104,7 @@ def list_dataset_assets(
     dataset_id: str = Path(...),
     version_id: str | None = Query(None),
     label_status: str | None = Query(None),
+    split: str | None = Query(None, description="Filter by train/val/test split"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -112,6 +115,7 @@ def list_dataset_assets(
         dataset_id,
         version_id=version_id,
         label_status=label_status,
+        split=split,
         limit=limit,
         offset=offset,
     )
@@ -120,10 +124,12 @@ def list_dataset_assets(
             {
                 "id": a.id,
                 "uri": a.uri,
+                "download_url": _presign_download(a.uri),
                 "mime_type": a.mime_type,
                 "width": a.width,
                 "height": a.height,
                 "label_status": a.label_status,
+                "split": split_service.asset_split(a),
                 "created_at": a.created_at.isoformat() if a.created_at else None,
             }
             for a in assets
@@ -132,6 +138,40 @@ def list_dataset_assets(
         "limit": limit,
         "offset": offset,
     }
+
+
+@router.get("/datasets/{dataset_id}/versions/{version_id}/split", response_model=SplitSummary)
+def get_version_split(
+    dataset_id: str = Path(...),
+    version_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return persisted train/val/test counts and per-class breakdown for a version."""
+    return split_service.get_split_summary(db, version_id)
+
+
+@router.post("/datasets/{dataset_id}/versions/{version_id}/split", response_model=SplitSummary)
+def assign_version_split(
+    body: SplitConfig,
+    dataset_id: str = Path(...),
+    version_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Deterministically (re)assign and persist the split for every asset in a version."""
+    try:
+        return split_service.assign_splits(
+            db,
+            version_id,
+            train=body.train,
+            val=body.val,
+            test=body.test,
+            seed=body.seed,
+            stratify=body.stratify,
+        )
+    except split_service.SplitConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/datasets/{dataset_id}/stats")
