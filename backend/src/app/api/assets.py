@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from app.db.deps import get_current_user, get_db
 from app.models.user import User
 from app.services.annotation_service import get_asset_annotations
-from app.services.asset_service import confirm_upload, get_asset, get_dataset_stats, list_assets
+from app.services.asset_service import (
+    confirm_upload,
+    get_asset,
+    get_dataset_metrics,
+    get_dataset_stats,
+    list_assets,
+)
 
 router = APIRouter(prefix="/api", tags=["assets"])
 
@@ -136,6 +142,17 @@ def dataset_stats(
     current_user: User = Depends(get_current_user),
 ):
     return get_dataset_stats(db, dataset_id, version_id=version_id)
+
+
+@router.get("/datasets/{dataset_id}/metrics")
+def dataset_metrics(
+    dataset_id: str = Path(...),
+    version_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Detailed dataset health metrics for the metrics dashboard."""
+    return get_dataset_metrics(db, dataset_id, version_id=version_id)
 
 
 @router.get("/assets/{asset_id}/neighbors")

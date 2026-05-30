@@ -4,7 +4,8 @@ import Input from '@/components/ui/Input';
 import Button from '@/components/ui/Button';
 import Alert from '@/components/ui/Alert';
 import Spinner from '@/components/ui/Spinner';
-import { apiGet, apiUrl, getToken } from '@/services/api';
+import { apiGet, apiUrl } from '@/services/api';
+import { getStoredToken } from '@/services/token-store';
 
 export interface ImportResult {
   dataset_id: string;
@@ -30,7 +31,11 @@ const DEFAULT_FORMATS = ['coco', 'yolo', 'pascal_voc', 'cvat', 'labelme', 'datum
  * Uses a raw multipart fetch (the api.ts helpers are JSON-only). Extracted from
  * the legacy import page so it can be embedded in the wizard and detail tab.
  */
-export default function ArchiveImporter({ datasetId, versionId, onComplete }: ArchiveImporterProps) {
+export default function ArchiveImporter({
+  datasetId,
+  versionId,
+  onComplete,
+}: ArchiveImporterProps) {
   const [formats, setFormats] = useState<string[]>(DEFAULT_FORMATS);
   const [fmt, setFmt] = useState('coco');
   const [imageUriBase, setImageUriBase] = useState('');
@@ -60,7 +65,7 @@ export default function ArchiveImporter({ datasetId, versionId, onComplete }: Ar
       fd.append('fmt', fmt);
       if (versionId) fd.append('version_id', versionId);
       if (imageUriBase) fd.append('image_uri_base', imageUriBase);
-      const token = getToken();
+      const token = getStoredToken();
       const res = await fetch(apiUrl(`/api/datasets/${datasetId}/import`), {
         method: 'POST',
         body: fd,

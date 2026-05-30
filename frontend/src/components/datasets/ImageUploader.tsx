@@ -102,13 +102,13 @@ export default function ImageUploader({ datasetId, versionId, onComplete }: Imag
 
         uploaded += 1;
         setUploads((prev) =>
-          prev.map((u, idx) => (idx === i ? { ...u, progress: 100, status: 'done' } : u))
+          prev.map((u, idx) => (idx === i ? { ...u, progress: 100, status: 'done' } : u)),
         );
       } catch (err) {
         hasError = true;
         const msg = err instanceof Error ? err.message : 'Upload failed';
         setUploads((prev) =>
-          prev.map((u, idx) => (idx === i ? { ...u, status: 'error', error: msg } : u))
+          prev.map((u, idx) => (idx === i ? { ...u, status: 'error', error: msg } : u)),
         );
         setError(msg);
       }
@@ -197,7 +197,9 @@ export default function ImageUploader({ datasetId, versionId, onComplete }: Imag
                 />
               </div>
               {u.error && (
-                <p className="text-[0.6875rem] font-mono text-[var(--hud-danger-text)]">{u.error}</p>
+                <p className="text-[0.6875rem] font-mono text-[var(--hud-danger-text)]">
+                  {u.error}
+                </p>
               )}
             </div>
           ))}

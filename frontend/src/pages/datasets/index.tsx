@@ -70,7 +70,9 @@ function CoverageCell({ dataset }: { dataset: Dataset }) {
 function DatasetRow({ dataset }: { dataset: Dataset }) {
   const status = STATUS_META[dataset.status ?? 'ready'] ?? STATUS_META.ready;
   return (
-    <div className={`${GRID} bg-[var(--hud-surface)] px-4 py-3 transition-colors duration-100 hover:bg-[var(--hud-elevated)]`}>
+    <div
+      className={`${GRID} bg-[var(--hud-surface)] px-4 py-3 transition-colors duration-100 hover:bg-[var(--hud-elevated)]`}
+    >
       {/* Dataset */}
       <div className="min-w-0">
         <Link
@@ -152,7 +154,7 @@ export default function DatasetsIndex() {
       .finally(() => setLoading(false));
   }, [projectId, page]);
 
-  const uploadTo = projectId ? `/datasets/upload?projectId=${projectId}` : '/datasets/upload';
+  const uploadTo = projectId ? `/datasets/new?projectId=${projectId}` : '/datasets/new';
 
   return (
     <div className="space-y-4.5">
@@ -162,10 +164,7 @@ export default function DatasetsIndex() {
           <div className="label-overline mb-1 flex items-center gap-2">
             {projectId ? '// Projects / Datasets' : '// Datasets'}
             {projectId && (
-              <Link
-                to="/datasets"
-                className="font-mono text-[var(--hud-accent)] hover:underline"
-              >
+              <Link to="/datasets" className="font-mono text-[var(--hud-accent)] hover:underline">
                 CLEAR ×
               </Link>
             )}
@@ -186,7 +185,7 @@ export default function DatasetsIndex() {
             to={uploadTo}
             className="inline-flex h-8 items-center border border-[var(--hud-accent)] bg-[var(--hud-accent)] px-3 font-mono text-xs font-medium uppercase tracking-wide text-[oklch(0.10_0.008_240)] transition-colors duration-100 hover:bg-[var(--hud-accent-hover)] hover:border-[var(--hud-accent-hover)]"
           >
-            + UPLOAD DATASET
+            + NEW DATASET
           </Link>
         </div>
       </div>
@@ -203,10 +202,10 @@ export default function DatasetsIndex() {
           description="Upload images or annotation files to create a dataset."
         >
           <Link
-            to="/datasets/upload"
+            to="/datasets/new"
             className="inline-flex h-7 items-center border border-[var(--hud-accent)] px-3 font-mono text-xs text-[var(--hud-accent)] transition-colors duration-100 hover:bg-[var(--hud-accent-dim)]"
           >
-            Upload Dataset →
+            New Dataset →
           </Link>
         </EmptyState>
       ) : (
@@ -214,7 +213,9 @@ export default function DatasetsIndex() {
           {/* Table */}
           <div className="border border-[var(--hud-border-default)]">
             {/* Header row */}
-            <div className={`${GRID} border-b border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-4 py-2`}>
+            <div
+              className={`${GRID} border-b border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-4 py-2`}
+            >
               <span className="label-overline">Dataset</span>
               <span className="label-overline">Task</span>
               <span className="label-overline">Assets</span>
