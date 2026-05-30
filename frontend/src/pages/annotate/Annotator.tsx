@@ -1,6 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiGet, apiPost, apiDelete, apiUrl } from '@/services/api';
+import { useSuggestions } from './useSuggestions';
+import type {
+  Annotation,
+  BoxGeometry,
+  Mode,
+  NeighborInfo,
+  Point,
+  PointsGeometry,
+  Suggestion,
+} from './types';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,37 +40,37 @@ const HUD = {
   textMuted: 'oklch(0.42 0.008 240)',
   textData: 'oklch(0.96 0.003 240)',
   accent: 'oklch(0.72 0.10 82)',
+  suggest: 'oklch(0.72 0.08 230)',
 };
 
 // ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
 
-function classColor(className, classes) {
+function classColor(className: string, classes: string[]): string {
   const idx = classes.indexOf(className);
   return CLASS_COLORS[(idx === -1 ? 0 : idx) % CLASS_COLORS.length];
 }
 
-function deepClone(value) {
+function deepClone<T>(value: T): T {
   if (typeof structuredClone === 'function') return structuredClone(value);
   return JSON.parse(JSON.stringify(value));
 }
 
-function distSq(a, b) {
+function distSq(a: Point, b: Point): number {
   const dx = a.x - b.x;
   const dy = a.y - b.y;
   return dx * dx + dy * dy;
 }
 
-function pointInPolygon(px, py, points) {
+function pointInPolygon(px: number, py: number, points: Point[]): boolean {
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
     const xi = points[i].x;
     const yi = points[i].y;
     const xj = points[j].x;
     const yj = points[j].y;
-    const intersect =
-      yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi + 1e-9) + xi;
+    const intersect = yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi + 1e-9) + xi;
     if (intersect) inside = !inside;
   }
   return inside;
@@ -70,43 +80,57 @@ function pointInPolygon(px, py, points) {
 // Main component
 // ---------------------------------------------------------------------------
 
+interface AssetData {
+  id: string;
+  dataset_id?: string;
+  filename?: string;
+  uri?: string;
+  download_url?: string;
+}
+
 export default function AnnotatorPage() {
-  const { assetId } = useParams();
+  const { assetId } = useParams<{ assetId: string }>();
   const navigate = useNavigate();
 
-  const [asset, setAsset] = useState(null);
-  const [annotations, setAnnotations] = useState([]);
-  const [classes, setClasses] = useState(['object']);
+  const [asset, setAsset] = useState<AssetData | null>(null);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [classes, setClasses] = useState<string[]>(['object']);
   const [selectedClass, setSelectedClass] = useState('object');
-  const [selectedAnnotationIdx, setSelectedAnnotationIdx] = useState(null);
-  // mode: 'box' | 'polygon' | 'keypoint' | 'classify' | 'select'
-  const [mode, setMode] = useState('box');
+  const [selectedAnnotationIdx, setSelectedAnnotationIdx] = useState<number | null>(null);
+  const [mode, setMode] = useState<Mode>('box');
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState('Loading…');
   const [newClassName, setNewClassName] = useState('');
   const [imageError, setImageError] = useState(false);
   const [scaleFactor, setScaleFactor] = useState(1);
-  const [neighbors, setNeighbors] = useState({ prev: null, next: null, index: null, total: 0 });
+  const [neighbors, setNeighbors] = useState<NeighborInfo>({
+    prev: null,
+    next: null,
+    index: null,
+    total: 0,
+  });
   const [datasetName, setDatasetName] = useState('');
   const [imgDims, setImgDims] = useState({ w: 0, h: 0 });
   const [showAddClass, setShowAddClass] = useState(false);
-  // In-progress polygon: array of points (image coordinates)
-  const [polygonInProgress, setPolygonInProgress] = useState([]);
+  const [polygonInProgress, setPolygonInProgress] = useState<Point[]>([]);
+
+  const suggest = useSuggestions(asset?.dataset_id);
 
   // Undo/redo stacks. Each entry is a snapshot of the annotations array.
-  const undoStack = useRef([]);
-  const redoStack = useRef([]);
+  const undoStack = useRef<Annotation[][]>([]);
+  const redoStack = useRef<Annotation[][]>([]);
 
   const drawingRef = useRef({ active: false, startX: 0, startY: 0, currentX: 0, currentY: 0 });
-  const canvasRef = useRef(null);
-  const imageRef = useRef(new Image());
-  const annotationsRef = useRef(annotations);
-  const selectedIdxRef = useRef(selectedAnnotationIdx);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imageRef = useRef<HTMLImageElement>(new Image());
+  const annotationsRef = useRef<Annotation[]>(annotations);
+  const selectedIdxRef = useRef<number | null>(selectedAnnotationIdx);
   const scaleRef = useRef(scaleFactor);
-  const classesRef = useRef(classes);
+  const classesRef = useRef<string[]>(classes);
   const selectedClassRef = useRef(selectedClass);
-  const modeRef = useRef(mode);
-  const polygonInProgressRef = useRef(polygonInProgress);
+  const modeRef = useRef<Mode>(mode);
+  const polygonInProgressRef = useRef<Point[]>(polygonInProgress);
+  const suggestionsRef = useRef<Suggestion[]>(suggest.suggestions);
 
   useEffect(() => {
     annotationsRef.current = annotations;
@@ -129,6 +153,9 @@ export default function AnnotatorPage() {
   useEffect(() => {
     polygonInProgressRef.current = polygonInProgress;
   }, [polygonInProgress]);
+  useEffect(() => {
+    suggestionsRef.current = suggest.suggestions;
+  }, [suggest.suggestions]);
 
   // -------------------------------------------------------------------------
   // History (undo/redo)
@@ -140,7 +167,7 @@ export default function AnnotatorPage() {
     redoStack.current = [];
   }
 
-  function applySnapshot(snapshot) {
+  function applySnapshot(snapshot: Annotation[]) {
     annotationsRef.current = snapshot;
     setAnnotations(snapshot);
     setSelectedAnnotationIdx(null);
@@ -150,7 +177,7 @@ export default function AnnotatorPage() {
   function undo() {
     if (undoStack.current.length === 0) return;
     redoStack.current.push(deepClone(annotationsRef.current));
-    const prev = undoStack.current.pop();
+    const prev = undoStack.current.pop()!;
     applySnapshot(prev);
     setStatus('Undid');
   }
@@ -158,7 +185,7 @@ export default function AnnotatorPage() {
   function redo() {
     if (redoStack.current.length === 0) return;
     undoStack.current.push(deepClone(annotationsRef.current));
-    const next = redoStack.current.pop();
+    const next = redoStack.current.pop()!;
     applySnapshot(next);
     setStatus('Redid');
   }
@@ -171,6 +198,7 @@ export default function AnnotatorPage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     const img = imageRef.current;
     const sf = scaleRef.current;
     const anns = annotationsRef.current;
@@ -178,6 +206,7 @@ export default function AnnotatorPage() {
     const cls = classesRef.current;
     const drawing = drawingRef.current;
     const polyInProgress = polygonInProgressRef.current;
+    const sugs = suggestionsRef.current;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -201,12 +230,12 @@ export default function AnnotatorPage() {
       ctx.setLineDash([]);
 
       if (ann.type === 'box') {
-        const { x, y, w, h } = ann.geometry;
+        const { x, y, w, h } = ann.geometry as BoxGeometry;
         ctx.strokeRect(x * sf, y * sf, w * sf, h * sf);
         labelTag(ctx, ann.class_name || '', x * sf, y * sf, color);
         if (isSel) drawHandlesForBox(ctx, x * sf, y * sf, w * sf, h * sf, color);
       } else if (ann.type === 'polygon') {
-        const pts = ann.geometry.points || [];
+        const pts = (ann.geometry as PointsGeometry).points || [];
         if (pts.length > 1) {
           ctx.beginPath();
           ctx.moveTo(pts[0].x * sf, pts[0].y * sf);
@@ -217,23 +246,28 @@ export default function AnnotatorPage() {
           ctx.fill();
           ctx.globalAlpha = 1;
           ctx.stroke();
-          labelTag(
-            ctx,
-            ann.class_name || '',
-            pts[0].x * sf,
-            pts[0].y * sf,
-            color
-          );
+          labelTag(ctx, ann.class_name || '', pts[0].x * sf, pts[0].y * sf, color);
           if (isSel) pts.forEach((p) => drawPointHandle(ctx, p.x * sf, p.y * sf, color));
         }
       } else if (ann.type === 'keypoint') {
-        const pts = ann.geometry.points || [];
+        const pts = (ann.geometry as PointsGeometry).points || [];
         pts.forEach((p, i) => {
           drawPointHandle(ctx, p.x * sf, p.y * sf, color, isSel ? 6 : 4);
-          if (i === 0)
-            labelTag(ctx, ann.class_name || '', p.x * sf - 2, p.y * sf, color);
+          if (i === 0) labelTag(ctx, ann.class_name || '', p.x * sf - 2, p.y * sf, color);
         });
       }
+    });
+
+    // Suggestions — dashed overlays with a score label.
+    sugs.forEach((s) => {
+      if (s.type !== 'box') return;
+      const { x, y, w, h } = s.geometry as BoxGeometry;
+      ctx.strokeStyle = HUD.suggest;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x * sf, y * sf, w * sf, h * sf);
+      ctx.setLineDash([]);
+      labelTag(ctx, `${s.class_name} ${s.score.toFixed(2)}`, x * sf, y * sf, HUD.suggest);
     });
 
     // In-progress polygon
@@ -247,9 +281,7 @@ export default function AnnotatorPage() {
         ctx.lineTo(polyInProgress[i].x * sf, polyInProgress[i].y * sf);
       ctx.stroke();
       ctx.setLineDash([]);
-      polyInProgress.forEach((p) =>
-        drawPointHandle(ctx, p.x * sf, p.y * sf, HUD.accent, 4)
-      );
+      polyInProgress.forEach((p) => drawPointHandle(ctx, p.x * sf, p.y * sf, HUD.accent, 4));
     }
 
     // In-progress box drag
@@ -263,7 +295,13 @@ export default function AnnotatorPage() {
     }
   }, []);
 
-  function labelTag(ctx, label, x, y, color) {
+  function labelTag(
+    ctx: CanvasRenderingContext2D,
+    label: string,
+    x: number,
+    y: number,
+    color: string,
+  ) {
     if (!label) return;
     ctx.font = '10px monospace';
     const w = ctx.measureText(label).width + 8;
@@ -275,7 +313,13 @@ export default function AnnotatorPage() {
     ctx.fillText(label, x + 4, y - 3);
   }
 
-  function drawPointHandle(ctx, x, y, color, size = 5) {
+  function drawPointHandle(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    color: string,
+    size = 5,
+  ) {
     ctx.fillStyle = HUD.textData;
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
@@ -285,7 +329,14 @@ export default function AnnotatorPage() {
     ctx.stroke();
   }
 
-  function drawHandlesForBox(ctx, cx, cy, cw, ch, color) {
+  function drawHandlesForBox(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    cw: number,
+    ch: number,
+    color: string,
+  ) {
     const handles = [
       [cx, cy],
       [cx + cw / 2, cy],
@@ -312,6 +363,7 @@ export default function AnnotatorPage() {
     setAnnotations([]);
     setSelectedAnnotationIdx(null);
     setPolygonInProgress([]);
+    suggest.clear();
     undoStack.current = [];
     redoStack.current = [];
     setDirty(false);
@@ -319,19 +371,20 @@ export default function AnnotatorPage() {
 
     async function load() {
       try {
-        const assetData = await apiGet(`/api/assets/${assetId}`);
+        const assetData = await apiGet<AssetData>(`/api/assets/${assetId}`);
         setAsset(assetData);
 
-        // Pre-populate the class sidebar from the dataset's ClassMap so
-        // annotators don't have to re-add classes every session.
         try {
           if (assetData.dataset_id) {
-            const dataset = await apiGet(`/api/datasets/${assetData.dataset_id}`);
+            const dataset = await apiGet<{
+              name?: string;
+              classes?: Array<string | { name?: string }>;
+            }>(`/api/datasets/${assetData.dataset_id}`);
             if (dataset?.name) setDatasetName(dataset.name);
             const seeded = Array.isArray(dataset.classes) ? dataset.classes : [];
             const names = seeded
               .map((c) => (typeof c === 'string' ? c : c?.name))
-              .filter(Boolean);
+              .filter((n): n is string => Boolean(n));
             if (names.length > 0) {
               setClasses(names);
               setSelectedClass(names[0]);
@@ -342,9 +395,13 @@ export default function AnnotatorPage() {
         }
 
         try {
-          const annsData = await apiGet(`/api/assets/${assetId}/annotations`);
-          const loaded = Array.isArray(annsData) ? annsData : annsData.items ?? [];
-          setAnnotations(loaded.map((a) => ({ ...a, isNew: false, dirty: false })));
+          const annsData = await apiGet<Annotation[] | { items: Annotation[] }>(
+            `/api/assets/${assetId}/annotations`,
+          );
+          const loaded = Array.isArray(annsData) ? annsData : (annsData.items ?? []);
+          setAnnotations(
+            loaded.map((a) => ({ ...a, isNew: false, dirty: false, origin: 'manual' })),
+          );
           const existingClasses = loaded.map((a) => a.class_name).filter(Boolean);
           if (existingClasses.length > 0) {
             setClasses((prev) => Array.from(new Set([...prev, ...existingClasses])));
@@ -354,7 +411,7 @@ export default function AnnotatorPage() {
         }
 
         try {
-          const n = await apiGet(`/api/assets/${assetId}/neighbors`);
+          const n = await apiGet<NeighborInfo>(`/api/assets/${assetId}/neighbors`);
           setNeighbors(n);
         } catch {
           setNeighbors({ prev: null, next: null, index: null, total: 0 });
@@ -366,11 +423,7 @@ export default function AnnotatorPage() {
         img.onload = () => {
           const canvas = canvasRef.current;
           if (!canvas) return;
-          const sf = Math.min(
-            MAX_CANVAS_W / img.naturalWidth,
-            MAX_CANVAS_H / img.naturalHeight,
-            1
-          );
+          const sf = Math.min(MAX_CANVAS_W / img.naturalWidth, MAX_CANVAS_H / img.naturalHeight, 1);
           canvas.width = Math.round(img.naturalWidth * sf);
           canvas.height = Math.round(img.naturalHeight * sf);
           setImgDims({ w: img.naturalWidth, h: img.naturalHeight });
@@ -387,47 +440,54 @@ export default function AnnotatorPage() {
           canvas.height = MAX_CANVAS_H;
           redraw();
         };
-        img.src =
-          assetData.download_url || assetData.uri || apiUrl(`/api/assets/${assetId}/file`);
+        img.src = assetData.download_url || assetData.uri || apiUrl(`/api/assets/${assetId}/file`);
       } catch (err) {
-        setStatus(`Error: ${err.message}`);
+        setStatus(`Error: ${err instanceof Error ? err.message : 'failed to load'}`);
       }
     }
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assetId, redraw]);
 
   useEffect(() => {
     redraw();
-  }, [annotations, selectedAnnotationIdx, scaleFactor, polygonInProgress, redraw]);
+  }, [
+    annotations,
+    selectedAnnotationIdx,
+    scaleFactor,
+    polygonInProgress,
+    suggest.suggestions,
+    redraw,
+  ]);
 
   // -------------------------------------------------------------------------
   // Mouse handlers
   // -------------------------------------------------------------------------
 
-  function canvasCoords(e) {
-    const canvas = canvasRef.current;
+  function canvasCoords(e: React.MouseEvent): Point {
+    const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }
 
-  function imageCoords(canvasX, canvasY) {
+  function imageCoords(canvasX: number, canvasY: number): Point {
     const sf = scaleRef.current;
     return { x: canvasX / sf, y: canvasY / sf };
   }
 
-  function hitTestAnnotation(canvasX, canvasY) {
+  function hitTestAnnotation(canvasX: number, canvasY: number): number | null {
     const anns = annotationsRef.current;
     const sf = scaleRef.current;
     const { x: ix, y: iy } = imageCoords(canvasX, canvasY);
     for (let i = anns.length - 1; i >= 0; i--) {
       const ann = anns[i];
       if (ann.type === 'box') {
-        const { x, y, w, h } = ann.geometry;
+        const { x, y, w, h } = ann.geometry as BoxGeometry;
         if (ix >= x && ix <= x + w && iy >= y && iy <= y + h) return i;
       } else if (ann.type === 'polygon') {
-        if (pointInPolygon(ix, iy, ann.geometry.points || [])) return i;
+        if (pointInPolygon(ix, iy, (ann.geometry as PointsGeometry).points || [])) return i;
       } else if (ann.type === 'keypoint') {
-        const pts = ann.geometry.points || [];
+        const pts = (ann.geometry as PointsGeometry).points || [];
         for (const p of pts) {
           if (Math.sqrt(distSq({ x: p.x * sf, y: p.y * sf }, { x: canvasX, y: canvasY })) < 8)
             return i;
@@ -437,7 +497,7 @@ export default function AnnotatorPage() {
     return null;
   }
 
-  function handleMouseDown(e) {
+  function handleMouseDown(e: React.MouseEvent) {
     const { x, y } = canvasCoords(e);
     const m = modeRef.current;
     if (m === 'box') {
@@ -446,10 +506,11 @@ export default function AnnotatorPage() {
     } else if (m === 'polygon') {
       const ip = imageCoords(x, y);
       const pts = polygonInProgressRef.current;
-      // double-click logic: finalize when clicking near the first point with >=3 pts
       if (
         pts.length >= 3 &&
-        Math.sqrt(distSq({ x: pts[0].x * scaleRef.current, y: pts[0].y * scaleRef.current }, { x, y })) < 10
+        Math.sqrt(
+          distSq({ x: pts[0].x * scaleRef.current, y: pts[0].y * scaleRef.current }, { x, y }),
+        ) < 10
       ) {
         finalizePolygon();
         return;
@@ -461,7 +522,7 @@ export default function AnnotatorPage() {
     } else if (m === 'keypoint') {
       const ip = imageCoords(x, y);
       pushHistory();
-      const newAnn = {
+      const newAnn: Annotation = {
         id: null,
         type: 'keypoint',
         class_name: selectedClassRef.current,
@@ -469,10 +530,11 @@ export default function AnnotatorPage() {
         isNew: true,
         dirty: true,
         version: 0,
+        origin: 'manual',
       };
       let newIdx = 0;
       setAnnotations((prev) => {
-        newIdx = prev.length; // index of the appended item in the new array
+        newIdx = prev.length;
         const updated = [...prev, newAnn];
         annotationsRef.current = updated;
         return updated;
@@ -485,7 +547,7 @@ export default function AnnotatorPage() {
     }
   }
 
-  function handleMouseMove(e) {
+  function handleMouseMove(e: React.MouseEvent) {
     if (!drawingRef.current.active) return;
     const { x, y } = canvasCoords(e);
     drawingRef.current = { ...drawingRef.current, currentX: x, currentY: y };
@@ -506,13 +568,12 @@ export default function AnnotatorPage() {
     const imgW = rawW / sf;
     const imgH = rawH / sf;
     if (imgW < 5 || imgH < 5) {
-      // Treat a non-drag as a click: select whatever box is under the cursor.
       setSelectedAnnotationIdx(hitTestAnnotation(currentX, currentY));
       redraw();
       return;
     }
     pushHistory();
-    const newAnn = {
+    const newAnn: Annotation = {
       id: null,
       type: 'box',
       class_name: selectedClassRef.current,
@@ -520,6 +581,7 @@ export default function AnnotatorPage() {
       isNew: true,
       dirty: true,
       version: 0,
+      origin: 'manual',
     };
     let newIdx = 0;
     setAnnotations((prev) => {
@@ -540,7 +602,7 @@ export default function AnnotatorPage() {
       return;
     }
     pushHistory();
-    const newAnn = {
+    const newAnn: Annotation = {
       id: null,
       type: 'polygon',
       class_name: selectedClassRef.current,
@@ -548,6 +610,7 @@ export default function AnnotatorPage() {
       isNew: true,
       dirty: true,
       version: 0,
+      origin: 'manual',
     };
     let newIdx = 0;
     setAnnotations((prev) => {
@@ -568,8 +631,9 @@ export default function AnnotatorPage() {
   // -------------------------------------------------------------------------
 
   useEffect(() => {
-    function onKeyDown(e) {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) redo();
@@ -601,19 +665,20 @@ export default function AnnotatorPage() {
       else if (e.key === 'p' || e.key === 'P') setMode('polygon');
       else if (e.key === 'k' || e.key === 'K') setMode('keypoint');
       else if (e.key === 'v' || e.key === 'V') setMode('select');
-      else if (e.key === 'c' || e.key === 'C') setMode('classify');
+      else if (e.key === 'c' || e.key === 'C') setMode('classification');
       else if (e.key === 'ArrowLeft' && neighbors.prev) navigateAsset(-1);
       else if (e.key === 'ArrowRight' && neighbors.next) navigateAsset(1);
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [neighbors.prev, neighbors.next]);
 
   // -------------------------------------------------------------------------
   // Annotation CRUD
   // -------------------------------------------------------------------------
 
-  function deleteAnnotation(idx) {
+  function deleteAnnotation(idx: number) {
     pushHistory();
     setAnnotations((prev) => {
       const ann = prev[idx];
@@ -627,11 +692,11 @@ export default function AnnotatorPage() {
     setDirty(true);
   }
 
-  function setAnnotationClass(idx, className) {
+  function setAnnotationClass(idx: number, className: string) {
     pushHistory();
     setAnnotations((prev) => {
       const updated = prev.map((a, i) =>
-        i === idx ? { ...a, class_name: className, dirty: true } : a
+        i === idx ? { ...a, class_name: className, dirty: true } : a,
       );
       annotationsRef.current = updated;
       return updated;
@@ -639,11 +704,11 @@ export default function AnnotatorPage() {
     setDirty(true);
   }
 
-  function applyClassification(className) {
+  function applyClassification(className: string) {
     pushHistory();
     setAnnotations((prev) => {
       const withoutClassify = prev.filter((a) => a.type !== 'classification');
-      const newAnn = {
+      const newAnn: Annotation = {
         id: null,
         type: 'classification',
         class_name: className,
@@ -651,6 +716,7 @@ export default function AnnotatorPage() {
         isNew: true,
         dirty: true,
         version: 0,
+        origin: 'manual',
       };
       const updated = [...withoutClassify, newAnn];
       annotationsRef.current = updated;
@@ -661,12 +727,102 @@ export default function AnnotatorPage() {
     setStatus(`Classification → "${className}"`);
   }
 
-  async function handleSave() {
+  // -------------------------------------------------------------------------
+  // Suggestions
+  // -------------------------------------------------------------------------
+
+  async function runSuggest() {
+    if (!assetId) return;
+    setStatus('Requesting suggestions…');
+    try {
+      const count = await suggest.fetchSuggestions(assetId);
+      setStatus(count > 0 ? `${count} suggestion(s) ready` : 'No suggestions returned');
+    } catch (err) {
+      setStatus(`Suggest failed: ${err instanceof Error ? err.message : 'error'}`);
+    }
+  }
+
+  function acceptSuggestion(tempId: string, alsoSelect = false) {
+    const s = suggestionsRef.current.find((x) => x.tempId === tempId);
+    if (!s) return;
+    pushHistory();
+    const newAnn: Annotation = {
+      id: null,
+      type: s.type,
+      class_name: s.class_name || selectedClassRef.current,
+      geometry: s.geometry,
+      isNew: true,
+      dirty: true,
+      version: 0,
+      origin: 'suggested',
+    };
+    let newIdx = 0;
+    setAnnotations((prev) => {
+      newIdx = prev.length;
+      const updated = [...prev, newAnn];
+      annotationsRef.current = updated;
+      return updated;
+    });
+    if (s.class_name && !classesRef.current.includes(s.class_name)) {
+      setClasses((prev) => Array.from(new Set([...prev, s.class_name])));
+    }
+    suggest.setSuggestions((prev) => prev.filter((x) => x.tempId !== tempId));
+    setDirty(true);
+    if (alsoSelect) {
+      setMode('select');
+      setSelectedAnnotationIdx(newIdx);
+    }
+  }
+
+  function rejectSuggestion(tempId: string) {
+    suggest.setSuggestions((prev) => prev.filter((x) => x.tempId !== tempId));
+  }
+
+  function acceptAllSuggestions() {
+    const all = suggestionsRef.current;
+    if (all.length === 0) return;
+    pushHistory();
+    const newAnns: Annotation[] = all.map((s) => ({
+      id: null,
+      type: s.type,
+      class_name: s.class_name || selectedClassRef.current,
+      geometry: s.geometry,
+      isNew: true,
+      dirty: true,
+      version: 0,
+      origin: 'suggested',
+    }));
+    setAnnotations((prev) => {
+      const updated = [...prev, ...newAnns];
+      annotationsRef.current = updated;
+      return updated;
+    });
+    const newClasses = all.map((s) => s.class_name).filter(Boolean);
+    if (newClasses.length > 0) {
+      setClasses((prev) => Array.from(new Set([...prev, ...newClasses])));
+    }
+    suggest.clear();
+    setDirty(true);
+    setStatus(`Accepted ${newAnns.length} suggestion(s)`);
+  }
+
+  const handleSave = useCallback(async () => {
     if (!assetId) return;
     setStatus('Saving…');
     try {
-      const creates = [];
-      const updates = [];
+      const creates: Array<{
+        client_id: string;
+        asset_id: string;
+        type: string;
+        geometry: unknown;
+        class_name: string;
+      }> = [];
+      const updates: Array<{
+        id: string;
+        geometry: unknown;
+        class_name: string;
+        expected_version: number;
+      }> = [];
       const current = annotationsRef.current;
       current.forEach((ann, idx) => {
         if (ann.isNew || !ann.id) {
@@ -691,19 +847,25 @@ export default function AnnotatorPage() {
         setStatus('Nothing to save');
         return;
       }
-      const result = await apiPost('/api/annotations/bulk', {
+      const result = await apiPost<{
+        created?: Array<{ client_id?: string; status: string; annotation?: Annotation }>;
+        updated?: Array<{ id: string; status: string; annotation?: Annotation }>;
+      }>('/api/annotations/bulk', {
         creates,
         updates,
         deletes: [],
       });
 
-      const createdById = new Map();
+      const createdById = new Map<string, Annotation>();
       (result.created || []).forEach((row) => {
         if (row.client_id && row.status === 'ok' && row.annotation) {
           createdById.set(row.client_id, row.annotation);
         }
       });
-      const updatedById = new Map();
+      const updatedById = new Map<
+        string,
+        { id: string; status: string; annotation?: Annotation }
+      >();
       (result.updated || []).forEach((row) => {
         if (row.id) updatedById.set(row.id, row);
       });
@@ -712,13 +874,7 @@ export default function AnnotatorPage() {
         if (ann.isNew || !ann.id) {
           const created = createdById.get(`idx-${idx}`);
           if (created) {
-            return {
-              ...ann,
-              id: created.id,
-              version: created.version,
-              isNew: false,
-              dirty: false,
-            };
+            return { ...ann, id: created.id, version: created.version, isNew: false, dirty: false };
           }
           return ann;
         }
@@ -750,9 +906,10 @@ export default function AnnotatorPage() {
         setStatus(`Saved with ${errors.length} issue(s) — see status`);
       }
     } catch (err) {
-      setStatus(`Save failed: ${err.message}`);
+      setStatus(`Save failed: ${err instanceof Error ? err.message : 'error'}`);
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetId]);
 
   function addClass() {
     const trimmed = newClassName.trim();
@@ -762,7 +919,7 @@ export default function AnnotatorPage() {
     setNewClassName('');
   }
 
-  function navigateAsset(direction) {
+  function navigateAsset(direction: number) {
     if (dirty && !window.confirm('You have unsaved changes. Leave anyway?')) return;
     const target = direction === 1 ? neighbors.next : neighbors.prev;
     if (target) {
@@ -783,16 +940,15 @@ export default function AnnotatorPage() {
   const classificationAnn = annotations.find((a) => a.type === 'classification');
   const visibleAnns = annotations.filter((a) => a.type !== 'classification');
 
-  // Normalized 0–1 area of a shape, as a percentage of the frame.
-  function annoArea(ann) {
+  function annoArea(ann: Annotation): number {
     const W = imgDims.w || 1;
     const H = imgDims.h || 1;
     if (ann.type === 'box') {
-      const { w, h } = ann.geometry;
+      const { w, h } = ann.geometry as BoxGeometry;
       return ((w * h) / (W * H)) * 100;
     }
     if (ann.type === 'polygon') {
-      const pts = ann.geometry.points || [];
+      const pts = (ann.geometry as PointsGeometry).points || [];
       let a = 0;
       for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
         a += pts[j].x * pts[i].y - pts[i].x * pts[j].y;
@@ -804,8 +960,7 @@ export default function AnnotatorPage() {
 
   const frameNo = (neighbors.index ?? 0) + 1;
   const frameTotal = neighbors.total || frameNo;
-  const fileName =
-    asset?.filename || asset?.uri?.split('/').pop() || `frame_${frameNo}`;
+  const fileName = asset?.filename || asset?.uri?.split('/').pop() || `frame_${frameNo}`;
   const frameLabel = imgDims.w ? `${fileName} · ${imgDims.w}×${imgDims.h}` : fileName;
 
   function handleExit() {
@@ -814,11 +969,11 @@ export default function AnnotatorPage() {
     else navigate(-1);
   }
 
-  const TOOLS = [
+  const TOOLS: { id: Mode; label: string; key: string }[] = [
     { id: 'box', label: 'BOX', key: 'B' },
     { id: 'polygon', label: 'POLYGON', key: 'P' },
     { id: 'keypoint', label: 'KEYPOINT', key: 'K' },
-    { id: 'classify', label: 'CLASSIFY', key: 'C' },
+    { id: 'classification', label: 'CLASSIFY', key: 'C' },
   ];
 
   const navBtn =
@@ -852,7 +1007,9 @@ export default function AnnotatorPage() {
             ← EXIT
           </button>
           <span className="h-4 w-px bg-[var(--hud-border-strong)]" />
-          <span className="label-overline">{'//'} {datasetName || 'dataset'}</span>
+          <span className="label-overline">
+            {'//'} {datasetName || 'dataset'}
+          </span>
         </div>
 
         {/* Center — tools */}
@@ -934,19 +1091,19 @@ export default function AnnotatorPage() {
             {classes.map((cls, i) => {
               const color = CLASS_COLORS[i % CLASS_COLORS.length];
               const active =
-                mode === 'classify'
+                mode === 'classification'
                   ? classificationAnn?.class_name === cls
                   : selectedClass === cls;
               return (
                 <button
                   key={cls}
+                  data-testid={`tag-${cls}`}
                   onClick={() => {
-                    if (mode === 'classify') {
+                    if (mode === 'classification') {
                       applyClassification(cls);
                       return;
                     }
                     setSelectedClass(cls);
-                    // Reassign the selected shape's class when one is active.
                     if (selectedAnnotationIdx != null) {
                       setAnnotationClass(selectedAnnotationIdx, cls);
                     }
@@ -965,20 +1122,16 @@ export default function AnnotatorPage() {
                   <span
                     className="flex-1 truncate font-mono text-[11.5px]"
                     style={{
-                      color: active
-                        ? 'var(--hud-text-primary)'
-                        : 'var(--hud-text-secondary)',
+                      color: active ? 'var(--hud-text-primary)' : 'var(--hud-text-secondary)',
                     }}
                   >
                     {cls}
                   </span>
-                  <span className="font-mono text-[9px] text-[var(--hud-text-muted)]">
-                    {i + 1}
-                  </span>
+                  <span className="font-mono text-[9px] text-[var(--hud-text-muted)]">{i + 1}</span>
                 </button>
               );
             })}
-            {mode === 'classify' && classificationAnn && (
+            {mode === 'classification' && classificationAnn && (
               <p className="px-3 py-2 font-mono text-[0.6875rem] text-[var(--hud-success-text)]">
                 ✓ {classificationAnn.class_name}
               </p>
@@ -1014,6 +1167,59 @@ export default function AnnotatorPage() {
 
         {/* Center — canvas + frame nav */}
         <div className="flex min-h-0 min-w-0 flex-col">
+          {/* Suggestion bar */}
+          <div className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--hud-border-subtle)] bg-[var(--hud-surface)] px-4 py-1.5">
+            <select
+              value={suggest.selectedModelId}
+              onChange={(e) => suggest.setSelectedModelId(e.target.value)}
+              disabled={!suggest.hasModel}
+              aria-label="Suggestion model"
+              className="h-6 border border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-1.5 font-mono text-[0.625rem] text-[var(--hud-text-secondary)] disabled:opacity-40"
+            >
+              {suggest.hasModel ? (
+                suggest.models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} v{m.version}
+                  </option>
+                ))
+              ) : (
+                <option value="">no trained model</option>
+              )}
+            </select>
+            <button
+              onClick={runSuggest}
+              disabled={!suggest.hasModel || suggest.loading}
+              data-testid="suggest-button"
+              className="inline-flex h-6 items-center gap-1 border border-[var(--hud-info)] px-2 font-mono text-[0.625rem] tracking-wide text-[var(--hud-info-text)] transition-colors duration-100 hover:bg-[var(--hud-info-dim)] disabled:opacity-40 disabled:pointer-events-none"
+            >
+              ✦ {suggest.loading ? 'SUGGESTING…' : 'SUGGEST'}
+            </button>
+            {suggest.suggestions.length > 0 && (
+              <>
+                <span className="font-mono text-[0.625rem] text-[var(--hud-info-text)]">
+                  {suggest.suggestions.length} pending
+                </span>
+                <button
+                  onClick={acceptAllSuggestions}
+                  className="h-6 border border-[var(--hud-success)] px-2 font-mono text-[0.625rem] tracking-wide text-[var(--hud-success-text)] hover:bg-[var(--hud-success-dim)]"
+                >
+                  ACCEPT ALL
+                </button>
+                <button
+                  onClick={() => suggest.clear()}
+                  className="h-6 border border-[var(--hud-border-strong)] px-2 font-mono text-[0.625rem] tracking-wide text-[var(--hud-text-muted)] hover:text-[var(--hud-danger-text)]"
+                >
+                  REJECT ALL
+                </button>
+              </>
+            )}
+            {!suggest.hasModel && (
+              <span className="font-mono text-[0.625rem] text-[var(--hud-text-muted)]">
+                Train a model on this dataset to enable AI suggestions
+              </span>
+            )}
+          </div>
+
           <div
             className="relative flex flex-1 items-center justify-center overflow-auto"
             style={{ background: 'var(--hud-inset)', padding: 24 }}
@@ -1102,8 +1308,60 @@ export default function AnnotatorPage() {
           </div>
         </div>
 
-        {/* Right — Annotations */}
+        {/* Right — Annotations + Suggestions */}
         <div className="flex min-h-0 flex-col border-l border-[var(--hud-border-default)] bg-[var(--hud-surface)]">
+          {suggest.suggestions.length > 0 && (
+            <div className="border-b border-[var(--hud-border-subtle)]">
+              <div className="flex items-center justify-between px-3 py-2.5">
+                <span className="label-overline text-[var(--hud-info-text)]">Suggestions</span>
+                <span className="font-mono text-[0.6875rem] text-[var(--hud-info-text)]">
+                  {suggest.suggestions.length}
+                </span>
+              </div>
+              <div className="max-h-48 overflow-y-auto">
+                {suggest.suggestions.map((s) => (
+                  <div
+                    key={s.tempId}
+                    className="flex items-center gap-2 border-b border-[var(--hud-border-subtle)] px-3 py-2"
+                  >
+                    <span
+                      className="inline-block flex-shrink-0"
+                      style={{ width: 9, height: 9, background: HUD.suggest }}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono text-[11.5px] text-[var(--hud-text-primary)]">
+                        {s.class_name}
+                      </div>
+                      <div className="font-mono text-[9px] text-[var(--hud-text-muted)]">
+                        {(s.score * 100).toFixed(0)}% conf
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => acceptSuggestion(s.tempId)}
+                      title="Accept"
+                      className="px-1 font-mono text-[0.625rem] text-[var(--hud-success-text)] hover:underline"
+                    >
+                      ✓
+                    </button>
+                    <button
+                      onClick={() => acceptSuggestion(s.tempId, true)}
+                      title="Accept & edit"
+                      className="px-1 font-mono text-[0.625rem] text-[var(--hud-text-secondary)] hover:text-[var(--hud-accent)]"
+                    >
+                      ✎
+                    </button>
+                    <button
+                      onClick={() => rejectSuggestion(s.tempId)}
+                      title="Reject"
+                      className="px-1 font-mono text-[0.625rem] text-[var(--hud-text-muted)] hover:text-[var(--hud-danger-text)]"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] px-3 py-2.5">
             <span className="label-overline">Annotations</span>
             <span className="font-mono text-[0.6875rem] text-[var(--hud-text-data)]">
@@ -1138,6 +1396,9 @@ export default function AnnotatorPage() {
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-mono text-[11.5px] text-[var(--hud-text-primary)]">
                         {ann.class_name}
+                        {ann.origin === 'suggested' && (
+                          <span className="ml-1 text-[8px] text-[var(--hud-info-text)]">✦</span>
+                        )}
                       </div>
                       <div className="font-mono text-[9px] text-[var(--hud-text-muted)]">
                         {annoArea(ann).toFixed(1)}% area

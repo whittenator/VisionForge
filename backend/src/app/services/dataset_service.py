@@ -62,3 +62,16 @@ def snapshot_version(db: Session, dataset_id: str, notes: str | None = None) -> 
     db.commit()
     db.refresh(ver)
     return ver
+
+
+def latest_open_version(db: Session, dataset_id: str) -> DatasetVersion | None:
+    """Return the newest editable (unlocked) version, or None if all are locked.
+
+    New imagery and annotations must land in an unlocked version; locked
+    versions are immutable snapshots.
+    """
+    return db.scalars(
+        select(DatasetVersion)
+        .where(DatasetVersion.dataset_id == dataset_id, DatasetVersion.locked.is_(False))
+        .order_by(DatasetVersion.version.desc())
+    ).first()

@@ -12,7 +12,9 @@ import ProjectDashboard from "./pages/projects/[projectId]/index";
 import DatasetUpload from "./pages/datasets/upload";
 import DatasetVersion from "./pages/datasets/version";
 import DatasetsIndex from "./pages/datasets/index";
+import DatasetNew from "./pages/datasets/new";
 import DatasetDetail from "./pages/datasets/[datasetId]/index";
+import DatasetMetrics from "./pages/datasets/[datasetId]/metrics";
 import DatasetAnnotateGateway from "./pages/datasets/[datasetId]/annotate";
 import DatasetReviewQueue from "./pages/datasets/[datasetId]/review";
 import ExperimentsIndex from "./pages/experiments/index";
@@ -228,9 +230,11 @@ export default function App() {
             <Route path="/projects/:projectId" element={<ProtectedRoute><ProjectDashboard /></ProtectedRoute>} />
             {/* Datasets */}
             <Route path="/datasets" element={<ProtectedRoute><DatasetsIndex /></ProtectedRoute>} />
+            <Route path="/datasets/new" element={<ProtectedRoute><DatasetNew /></ProtectedRoute>} />
             <Route path="/datasets/upload" element={<ProtectedRoute><DatasetUpload /></ProtectedRoute>} />
             <Route path="/datasets/version" element={<ProtectedRoute><DatasetVersion /></ProtectedRoute>} />
             <Route path="/datasets/:datasetId" element={<ProtectedRoute><DatasetDetail /></ProtectedRoute>} />
+            <Route path="/datasets/:datasetId/metrics" element={<ProtectedRoute><DatasetMetrics /></ProtectedRoute>} />
             <Route path="/datasets/:datasetId/annotate" element={<ProtectedRoute><DatasetAnnotateGateway /></ProtectedRoute>} />
             <Route path="/datasets/:datasetId/review" element={<ProtectedRoute><DatasetReviewQueue /></ProtectedRoute>} />
             {/* Experiments */}

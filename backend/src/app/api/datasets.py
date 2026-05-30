@@ -162,6 +162,10 @@ def get_dataset(
             classes = json.loads(class_map.classes)
         except Exception:
             classes = []
+    # The newest version (latest) and the newest editable/unlocked version
+    # (open) — the UI writes new imagery/imports into the open version.
+    latest_v = versions[0] if versions else None
+    open_v = next((v for v in versions if not v.locked), None)
     return {
         "id": d.id,
         "project_id": d.project_id,
@@ -169,6 +173,8 @@ def get_dataset(
         "description": d.description,
         "task_type": d.task_type,
         "classes": classes,
+        "latest_version_id": latest_v.id if latest_v else None,
+        "open_version_id": open_v.id if open_v else None,
         "versions": [
             {
                 "id": v.id,
