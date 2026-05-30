@@ -26,6 +26,9 @@ class ExperimentRun(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Unnamed Run")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    # Training library for this run (ultralytics | timm | …). Nullable for rows
+    # created before pluggable frameworks; treated as "ultralytics" downstream.
+    framework: Mapped[str | None] = mapped_column(String(32), nullable=True)
     params_json: Mapped[str | None] = mapped_column(
         "params", Text, nullable=True
     )  # DB column "params" mapped to params_json

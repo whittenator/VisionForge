@@ -51,12 +51,16 @@ def export_task(payload: dict) -> dict:
         if run is None:
             raise ValueError(f"ExperimentRun {experiment_id!r} not found")
 
-        # Determine MinIO key for the .pt model
+        # Determine MinIO key for the .pt model and which framework produced it
+        # so we can dispatch to the right exporter (Ultralytics .export() vs
+        # timm torch.onnx.export vs …).
         artifacts_data: list[dict] = json.loads(run.artifacts or "[]")
         pt_key: str | None = None
+        framework: str | None = getattr(run, "framework", None)
         for art in artifacts_data:
             if art.get("type") == "pytorch":
                 pt_key = art.get("key")
+                framework = art.get("framework") or framework
                 break
 
         # Allow override via payload
@@ -99,30 +103,24 @@ def export_task(payload: dict) -> dict:
             if job_id:
                 update_job_status(db, job_id, status="running", progress=0.3)
 
-            # Export to ONNX using Ultralytics
+            # Export to ONNX via the framework's trainer (no hard-coded library).
             onnx_path: Path | None = None
             try:
-                from ultralytics import YOLO  # type: ignore
+                from app.services import training as training_pkg
 
                 if pt_path.exists() and pt_path.stat().st_size > 0:
-                    model = YOLO(str(pt_path))
-                    export_kwargs: dict = {"format": "onnx", "simplify": True}
-                    if dynamic_axes is not None:
-                        export_kwargs["dynamic"] = bool(dynamic_axes)
-                    else:
-                        export_kwargs["dynamic"] = True
-                    if opset is not None:
-                        export_kwargs["opset"] = int(opset)
-                    export_result = model.export(**export_kwargs)
-                    # export() returns the path to the exported file
-                    if export_result:
-                        onnx_path = Path(str(export_result))
-                    else:
-                        # Fall back to searching for .onnx next to .pt
+                    trainer = training_pkg.get_trainer(framework)
+                    onnx_path = trainer.export_onnx(
+                        pt_path,
+                        tmp_path,
+                        opset=opset,
+                        dynamic=bool(dynamic_axes) if dynamic_axes is not None else True,
+                    )
+                    if onnx_path is None:
                         candidate = pt_path.with_suffix(".onnx")
                         if candidate.exists():
                             onnx_path = candidate
-            except ImportError:
+            except (ImportError, NotImplementedError):
                 pass
 
             if job_id:

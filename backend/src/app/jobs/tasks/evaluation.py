@@ -669,7 +669,12 @@ def evaluate_task(payload: dict) -> dict:
 
 
 def _load_model(artifact, scratch_dir: Path) -> Any:
-    """Lazy model loader. Downloads weights into `scratch_dir` (caller-managed)."""
+    """Lazy model loader. Downloads weights into `scratch_dir` (caller-managed).
+
+    Returns ``(kind, predictor)`` where ``kind`` is ``"onnx"`` or the framework
+    key (e.g. ``"ultralytics"``, ``"timm"``). Framework dispatch goes through the
+    trainer registry so no library name is hard-coded here.
+    """
     storage_path = artifact.storage_path
     if not storage_path:
         raise RuntimeError("artifact has no storage_path")
@@ -684,54 +689,42 @@ def _load_model(artifact, scratch_dir: Path) -> Any:
             "onnx",
             ort.InferenceSession(str(local), providers=["CPUExecutionProvider"]),
         )
-    # Default: YOLO weights
-    from ultralytics import YOLO  # type: ignore
+    from app.services import training as training_pkg
 
-    return ("yolo", YOLO(str(local)))
+    framework = getattr(artifact, "framework", None)
+    trainer = training_pkg.get_trainer(framework)
+    return (trainer.key, trainer.load_predictor(local))
 
 
 def _predict_detections(model, asset, score_threshold: float) -> list[dict[str, Any]]:
     kind, m = model
+    if kind == "onnx":
+        return []
     with tempfile.TemporaryDirectory() as tmp:
         img_path = Path(tmp) / "img"
         if not _download_to(asset.uri, img_path):
             return []
-        if kind != "yolo":
+        from app.services import training as training_pkg
+
+        try:
+            return training_pkg.get_trainer(kind).predict_detections(
+                m, str(img_path), score_threshold
+            )
+        except NotImplementedError:
             return []
-        results = m.predict(str(img_path), conf=score_threshold, verbose=False)
-        out: list[dict[str, Any]] = []
-        for r in results:
-            names = getattr(r, "names", {}) or {}
-            for box in getattr(r, "boxes", []) or []:
-                cls_idx = int(box.cls.item()) if hasattr(box, "cls") else 0
-                xy = box.xywh[0].tolist() if hasattr(box, "xywh") else [0, 0, 0, 0]
-                cx, cy, w, h = xy
-                out.append(
-                    {
-                        "class": names.get(cls_idx, str(cls_idx)),
-                        "bbox": (cx - w / 2, cy - h / 2, w, h),
-                        "score": (float(box.conf.item()) if hasattr(box, "conf") else 0.0),
-                    }
-                )
-        return out
 
 
 def _predict_classification(model, asset, classes: list[str]) -> tuple[str, float]:
     kind, m = model
+    if kind == "onnx":
+        return ("unknown", 0.0)
     with tempfile.TemporaryDirectory() as tmp:
         img_path = Path(tmp) / "img"
         if not _download_to(asset.uri, img_path):
             return ("unknown", 0.0)
-        if kind != "yolo":
+        from app.services import training as training_pkg
+
+        try:
+            return training_pkg.get_trainer(kind).predict_classification(m, str(img_path))
+        except NotImplementedError:
             return ("unknown", 0.0)
-        results = m.predict(str(img_path), verbose=False)
-        for r in results:
-            probs = getattr(r, "probs", None)
-            if probs is not None:
-                top = int(probs.top1)
-                names = getattr(r, "names", {}) or {}
-                return (
-                    names.get(top, str(top)),
-                    float(probs.top1conf.item()),
-                )
-    return ("unknown", 0.0)

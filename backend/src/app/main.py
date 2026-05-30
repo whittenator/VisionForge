@@ -25,6 +25,7 @@ from app.api.jobs import router as jobs_router
 from app.api.middleware import auth_rate_limit_middleware, logging_middleware
 from app.api.ops import router as ops_router
 from app.api.projects import router as projects_router
+from app.api.training import router as training_router
 from app.db.deps import get_db
 from app.models.job import Job as JobModel
 from app.observability.logging import configure_logging
@@ -129,6 +130,7 @@ app.include_router(artifacts_router)
 app.include_router(clusters_router)
 app.include_router(agents_router)
 app.include_router(evaluations_router)
+app.include_router(training_router)
 
 # New feature routers (conditionally registered based on availability)
 if _has_annotations:

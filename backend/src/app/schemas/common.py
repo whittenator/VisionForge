@@ -18,7 +18,8 @@ class UploadUrlResponse(BaseModel):
 class TrainRequest(BaseModel):
     projectId: str
     datasetVersionId: str
-    task: str  # "detect" or "classify"
+    task: str  # "detect" | "classify" | "segment" | "pose"
+    framework: str = "ultralytics"  # which training backend to use
     baseModel: str = "yolov8n.pt"
     params: dict[str, Any] = {}
     name: str = "Training Run"
