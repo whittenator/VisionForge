@@ -8,12 +8,11 @@ are saved through the normal bulk-annotation path.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-import os
 
 from app.models.artifact import ModelArtifact
 from app.models.asset import Asset
