@@ -68,7 +68,7 @@ export default function DatasetNew() {
           description: description.trim() || undefined,
           task_type: taskType,
           classes: classes.length ? classes : undefined,
-        }
+        },
       );
       setDatasetId(ds.id);
       setVersionId(ds.activeVersionId);
@@ -125,9 +125,7 @@ export default function DatasetNew() {
                   {label.toUpperCase()}
                 </span>
               </div>
-              {i < STEPS.length - 1 && (
-                <span className="h-px w-6 bg-[var(--hud-border-default)]" />
-              )}
+              {i < STEPS.length - 1 && <span className="h-px w-6 bg-[var(--hud-border-default)]" />}
             </React.Fragment>
           );
         })}

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.deps import get_current_user, get_db
 from app.models.annotation import REVIEW_STATUSES
 from app.models.user import User
+from app.services import inference_service, suggestion_service
 from app.services.annotation_service import (
     AnnotationError,
     VersionConflictError,
@@ -245,6 +246,78 @@ def review_queue_summary(
     current_user: User = Depends(get_current_user),
 ):
     return review_summary(db, dataset_id=dataset_id, version_id=version_id)
+
+
+class SuggestRequest(BaseModel):
+    asset_id: str
+    artifact_id: str | None = None
+    score_threshold: float = Field(0.25, ge=0.0, le=1.0)
+
+
+@router.post("/suggest")
+def suggest(
+    body: SuggestRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run a trained model on an asset and return proposed annotations.
+
+    Suggestions are not persisted; the annotator overlays them and saves any
+    accepted ones through the normal bulk path. 404 when no model is available,
+    502 when inference fails.
+    """
+    try:
+        artifact, suggestions = suggestion_service.suggest_annotations(
+            db,
+            asset_id=body.asset_id,
+            artifact_id=body.artifact_id,
+            score_threshold=body.score_threshold,
+        )
+    except suggestion_service.NoModelError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except suggestion_service.SuggestionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except inference_service.InferenceError as exc:
+        raise HTTPException(status_code=502, detail=f"inference failed: {exc}") from exc
+
+    return {
+        "artifact": {
+            "id": artifact.id,
+            "name": artifact.name,
+            "version": artifact.version,
+        },
+        "suggestions": [
+            {
+                "type": s.type,
+                "geometry": s.geometry,
+                "class_name": s.class_name,
+                "score": s.score,
+            }
+            for s in suggestions
+        ],
+    }
+
+
+@router.get("/suggest/artifacts")
+def suggest_artifacts(
+    dataset_id: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List models trained on this dataset, newest first (override dropdown)."""
+    arts = suggestion_service.candidate_artifacts_for_dataset(db, dataset_id)
+    return {
+        "items": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "version": a.version,
+                "format": a.format,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a in arts
+        ]
+    }
 
 
 class ErrorMineRequest(BaseModel):
