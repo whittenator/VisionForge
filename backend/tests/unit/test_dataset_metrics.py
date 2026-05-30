@@ -11,8 +11,21 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 
 
+def _register_models() -> None:
+    """Import the ORM models so their tables register on Base.metadata before
+    create_all (the app conftest does this transitively; we do it explicitly so
+    the suite also runs standalone)."""
+    import app.models.annotation  # noqa: F401
+    import app.models.asset  # noqa: F401
+    import app.models.dataset  # noqa: F401
+    import app.models.dataset_version  # noqa: F401
+    import app.models.project  # noqa: F401
+    import app.models.workspace  # noqa: F401
+
+
 @pytest.fixture
 def db():
+    _register_models()
     engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)

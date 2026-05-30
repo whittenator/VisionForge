@@ -12,8 +12,24 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 
 
+def _register_models() -> None:
+    """Import the ORM models so their tables register on Base.metadata before
+    create_all (the app conftest does this transitively; we do it explicitly so
+    the suite also runs standalone)."""
+    import app.models.annotation  # noqa: F401
+    import app.models.artifact  # noqa: F401
+    import app.models.asset  # noqa: F401
+    import app.models.dataset  # noqa: F401
+    import app.models.dataset_version  # noqa: F401
+    import app.models.experiment  # noqa: F401
+    import app.models.project  # noqa: F401
+    import app.models.user  # noqa: F401
+    import app.models.workspace  # noqa: F401
+
+
 @pytest.fixture
 def db():
+    _register_models()
     engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
@@ -57,6 +73,7 @@ def _add_run_and_artifact(db, *, run_id, artifact_id, status, created_offset_day
             id=run_id,
             project_id="proj-1",
             dataset_version_id="ver-1",
+            owner_id="user-1",
             status=status,
         )
     )
@@ -115,7 +132,7 @@ def test_suggest_maps_detections(db, monkeypatch):
         db, run_id="r1", artifact_id="art-1", status="succeeded", created_offset_days=-1
     )
 
-    monkeypatch.setattr(suggestion_service, "fetch_asset_bytes", lambda asset, **kw: b"img")
+    monkeypatch.setattr(suggestion_service, "_load_image_bytes", lambda asset: b"img")
     monkeypatch.setattr(
         inference_service,
         "predict",
@@ -152,7 +169,11 @@ def test_override_must_belong_to_dataset(db, monkeypatch):
     # An artifact from an unrelated run/dataset version.
     db.add(
         ExperimentRun(
-            id="r-other", project_id="proj-1", dataset_version_id="ver-other", status="succeeded"
+            id="r-other",
+            project_id="proj-1",
+            dataset_version_id="ver-other",
+            owner_id="user-1",
+            status="succeeded",
         )
     )
     db.add(
@@ -169,6 +190,6 @@ def test_override_must_belong_to_dataset(db, monkeypatch):
     )
     db.commit()
 
-    monkeypatch.setattr(suggestion_service, "fetch_asset_bytes", lambda asset, **kw: b"img")
+    monkeypatch.setattr(suggestion_service, "_load_image_bytes", lambda asset: b"img")
     with pytest.raises(suggestion_service.SuggestionError):
         suggestion_service.suggest_annotations(db, asset_id="asset-1", artifact_id="art-other")

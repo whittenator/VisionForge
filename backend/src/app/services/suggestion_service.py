@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import os
+
 from app.models.artifact import ModelArtifact
 from app.models.asset import Asset
 from app.models.dataset_version import DatasetVersion
@@ -27,6 +29,45 @@ class SuggestionError(Exception):
 
 class NoModelError(SuggestionError):
     """No successful model is available for the asset's dataset."""
+
+
+def _extract_minio_key(uri: str) -> str:
+    """Extract the object key from an asset URI (mirrors prelabels.py)."""
+    for prefix in ("s3://", "minio://"):
+        if uri.startswith(prefix):
+            parts = uri[len(prefix) :].split("/", 1)
+            return parts[1] if len(parts) > 1 else uri
+    if uri.startswith(("http://", "https://")):
+        path = uri.split("/", 3)
+        return path[3] if len(path) > 3 else uri
+    return uri
+
+
+def _load_image_bytes(asset: Asset) -> bytes:
+    """Load an asset's image bytes from object storage (or an HTTP URL).
+
+    Tries the SSRF-safe HTTP fetcher first for absolute URLs, then falls back to
+    MinIO using the object key. Raises SuggestionError when the image can't be
+    retrieved so the router can surface a clear error.
+    """
+    uri = asset.uri or ""
+    if uri.startswith(("http://", "https://")):
+        data = fetch_asset_bytes(uri)
+        if data:
+            return data
+    try:
+        from app.services.storage import get_minio_client
+
+        bucket = os.getenv("MINIO_BUCKET", os.getenv("S3_BUCKET", "visionforge"))
+        client = get_minio_client()
+        response = client.get_object(bucket, _extract_minio_key(uri))
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+    except Exception as exc:  # pragma: no cover - exercised via monkeypatch in tests
+        raise SuggestionError(f"could not load image for asset {asset.id}: {exc}") from exc
 
 
 @dataclass
@@ -93,7 +134,7 @@ def suggest_annotations(
         if not artifact:
             raise NoModelError("no successful model trained on this dataset")
 
-    image_bytes = fetch_asset_bytes(asset)
+    image_bytes = _load_image_bytes(asset)
     result = inference_service.predict(artifact, image_bytes, score_threshold=score_threshold)
 
     suggestions: list[Suggestion] = []
