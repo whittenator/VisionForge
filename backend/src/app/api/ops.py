@@ -53,6 +53,7 @@ def train(
             base_model=payload.baseModel,
             owner_id=current_user.id,
             cluster_id=payload.clusterId,
+            framework=payload.framework,
         )
     except cluster_service.ClusterNotAvailableError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

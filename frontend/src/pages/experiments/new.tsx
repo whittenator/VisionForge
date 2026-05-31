@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -19,9 +19,10 @@ interface Dataset {
   latest_version_id?: string;
 }
 
-const BASE_MODELS = ['yolov8n.pt', 'yolov8s.pt', 'yolov8m.pt', 'yolov8l.pt', 'yolov8x.pt'];
-
-type FieldType = 'number' | 'bool' | 'select';
+// Field schema, mirroring the backend FieldDef shape. The training form is
+// rendered entirely from the capabilities the backend reports, so no framework
+// (Ultralytics, Timm, …) is hard-coded here.
+type FieldType = 'number' | 'bool' | 'select' | 'text' | 'model';
 interface FieldDef {
   key: string;
   label: string;
@@ -33,271 +34,34 @@ interface FieldDef {
   options?: string[];
   help?: string;
 }
+interface FieldGroup {
+  title: string;
+  fields: FieldDef[];
+}
+interface FrameworkCapabilities {
+  key: string;
+  label: string;
+  supported_tasks: string[];
+  models_by_task: Record<string, string[]>;
+  groups: FieldGroup[];
+  device_options: string[];
+}
 
-// Single source of truth for every tunable hyperparameter / augmentation knob.
-// Adding a field here exposes it in the UI and forwards it to the backend.
-const GROUPS: { title: string; fields: FieldDef[] }[] = [
-  {
-    title: 'Core',
-    fields: [
-      { key: 'epochs', label: 'Epochs', type: 'number', default: 50, min: 1, max: 2000 },
-      { key: 'batch', label: 'Batch Size', type: 'number', default: 16, min: 1, max: 512 },
-      {
-        key: 'imgsz',
-        label: 'Image Size',
-        type: 'number',
-        default: 640,
-        min: 32,
-        max: 1920,
-        step: 32,
-      },
-      {
-        key: 'patience',
-        label: 'Patience',
-        type: 'number',
-        default: 100,
-        min: 0,
-        max: 1000,
-        help: 'Early-stop after N epochs w/o improvement',
-      },
-      { key: 'seed', label: 'Seed', type: 'number', default: 0, min: 0 },
-      {
-        key: 'rect',
-        label: 'Rectangular',
-        type: 'bool',
-        default: false,
-        help: 'Rectangular batches (min padding)',
-      },
-      { key: 'single_cls', label: 'Single class', type: 'bool', default: false },
-    ],
-  },
-  {
-    title: 'Optimizer & Schedule',
-    fields: [
-      {
-        key: 'optimizer',
-        label: 'Optimizer',
-        type: 'select',
-        default: 'auto',
-        options: ['auto', 'SGD', 'Adam', 'AdamW', 'NAdam', 'RAdam', 'RMSProp'],
-      },
-      {
-        key: 'lr0',
-        label: 'Initial LR (lr0)',
-        type: 'number',
-        default: 0.01,
-        min: 0.00001,
-        max: 1,
-        step: 0.0001,
-      },
-      {
-        key: 'lrf',
-        label: 'Final LR (lrf)',
-        type: 'number',
-        default: 0.01,
-        min: 0.00001,
-        max: 1,
-        step: 0.0001,
-      },
-      {
-        key: 'momentum',
-        label: 'Momentum',
-        type: 'number',
-        default: 0.937,
-        min: 0,
-        max: 1,
-        step: 0.001,
-      },
-      {
-        key: 'weight_decay',
-        label: 'Weight Decay',
-        type: 'number',
-        default: 0.0005,
-        min: 0,
-        max: 0.1,
-        step: 0.0001,
-      },
-      {
-        key: 'warmup_epochs',
-        label: 'Warmup Epochs',
-        type: 'number',
-        default: 3.0,
-        min: 0,
-        max: 20,
-        step: 0.5,
-      },
-      {
-        key: 'warmup_momentum',
-        label: 'Warmup Momentum',
-        type: 'number',
-        default: 0.8,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      {
-        key: 'warmup_bias_lr',
-        label: 'Warmup Bias LR',
-        type: 'number',
-        default: 0.1,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      { key: 'cos_lr', label: 'Cosine LR', type: 'bool', default: false },
-      {
-        key: 'close_mosaic',
-        label: 'Close Mosaic',
-        type: 'number',
-        default: 10,
-        min: 0,
-        max: 100,
-        help: 'Disable mosaic for last N epochs',
-      },
-      { key: 'nbs', label: 'Nominal Batch', type: 'number', default: 64, min: 1, max: 256 },
-      { key: 'amp', label: 'AMP', type: 'bool', default: true, help: 'Automatic mixed precision' },
-    ],
-  },
-  {
-    title: 'Regularization & Loss Gains',
-    fields: [
-      {
-        key: 'dropout',
-        label: 'Dropout',
-        type: 'number',
-        default: 0.0,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      {
-        key: 'label_smoothing',
-        label: 'Label Smoothing',
-        type: 'number',
-        default: 0.0,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      { key: 'box', label: 'Box Gain', type: 'number', default: 7.5, min: 0, max: 20, step: 0.1 },
-      { key: 'cls', label: 'Cls Gain', type: 'number', default: 0.5, min: 0, max: 10, step: 0.1 },
-      { key: 'dfl', label: 'DFL Gain', type: 'number', default: 1.5, min: 0, max: 10, step: 0.1 },
-      { key: 'overlap_mask', label: 'Overlap Mask', type: 'bool', default: true },
-      { key: 'mask_ratio', label: 'Mask Ratio', type: 'number', default: 4, min: 1, max: 16 },
-    ],
-  },
-  {
-    title: 'Augmentation',
-    fields: [
-      {
-        key: 'hsv_h',
-        label: 'hsv_h',
-        type: 'number',
-        default: 0.015,
-        min: 0,
-        max: 1,
-        step: 0.001,
-        help: 'Hue jitter fraction',
-      },
-      {
-        key: 'hsv_s',
-        label: 'hsv_s',
-        type: 'number',
-        default: 0.7,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        help: 'Saturation jitter',
-      },
-      {
-        key: 'hsv_v',
-        label: 'hsv_v',
-        type: 'number',
-        default: 0.4,
-        min: 0,
-        max: 1,
-        step: 0.01,
-        help: 'Value jitter',
-      },
-      {
-        key: 'degrees',
-        label: 'degrees',
-        type: 'number',
-        default: 0.0,
-        min: 0,
-        max: 180,
-        step: 1,
-        help: 'Rotation range',
-      },
-      {
-        key: 'translate',
-        label: 'translate',
-        type: 'number',
-        default: 0.1,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      { key: 'scale', label: 'scale', type: 'number', default: 0.5, min: 0, max: 1, step: 0.01 },
-      { key: 'shear', label: 'shear', type: 'number', default: 0.0, min: 0, max: 10, step: 0.1 },
-      {
-        key: 'perspective',
-        label: 'perspective',
-        type: 'number',
-        default: 0.0,
-        min: 0,
-        max: 0.001,
-        step: 0.0001,
-      },
-      { key: 'flipud', label: 'flipud', type: 'number', default: 0.0, min: 0, max: 1, step: 0.01 },
-      { key: 'fliplr', label: 'fliplr', type: 'number', default: 0.5, min: 0, max: 1, step: 0.01 },
-      { key: 'bgr', label: 'bgr', type: 'number', default: 0.0, min: 0, max: 1, step: 0.01 },
-      { key: 'mosaic', label: 'mosaic', type: 'number', default: 1.0, min: 0, max: 1, step: 0.01 },
-      { key: 'mixup', label: 'mixup', type: 'number', default: 0.0, min: 0, max: 1, step: 0.01 },
-      {
-        key: 'copy_paste',
-        label: 'copy_paste',
-        type: 'number',
-        default: 0.0,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      {
-        key: 'erasing',
-        label: 'erasing',
-        type: 'number',
-        default: 0.4,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      {
-        key: 'crop_fraction',
-        label: 'crop_fraction',
-        type: 'number',
-        default: 1.0,
-        min: 0,
-        max: 1,
-        step: 0.01,
-      },
-      {
-        key: 'auto_augment',
-        label: 'auto_augment',
-        type: 'select',
-        default: 'randaugment',
-        options: ['randaugment', 'autoaugment', 'augmix'],
-      },
-    ],
-  },
-];
+const TASK_LABELS: Record<string, string> = {
+  detect: 'Object Detection',
+  classify: 'Classification',
+  segment: 'Segmentation',
+  pose: 'Pose Estimation',
+};
 
-const DEVICES = ['cpu', 'cuda', 'mps', '0', '0,1'];
-
-function buildDefaults(): Record<string, number | boolean | string> {
+function buildDefaults(groups: FieldGroup[]): Record<string, number | boolean | string> {
   const out: Record<string, number | boolean | string> = {};
-  for (const g of GROUPS) for (const f of g.fields) out[f.key] = f.default;
+  for (const g of groups) for (const f of g.fields) out[f.key] = f.default;
   return out;
+}
+
+function hasModelField(groups: FieldGroup[]): boolean {
+  return groups.some((g) => g.fields.some((f) => f.type === 'model'));
 }
 
 function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
@@ -308,14 +72,88 @@ function FieldLabel({ htmlFor, children }: { htmlFor: string; children: React.Re
   );
 }
 
+// Searchable picker for frameworks with large catalogues (e.g. Timm's ~1300
+// architectures). Queries the backend model-search endpoint as the user types.
+function SearchableModel({
+  frameworkKey,
+  task,
+  value,
+  onChange,
+  id,
+}: {
+  frameworkKey: string;
+  task: string;
+  value: string;
+  onChange: (v: string) => void;
+  id: string;
+}) {
+  const [query, setQuery] = useState(value);
+  const [results, setResults] = useState<string[]>([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const handle = setTimeout(() => {
+      apiGet<{ items: string[] }>(
+        `/api/training/frameworks/${frameworkKey}/models?task=${task}&query=${encodeURIComponent(query)}`,
+      )
+        .then((d) => active && setResults(d.items || []))
+        .catch(() => active && setResults([]));
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(handle);
+    };
+  }, [query, frameworkKey, task]);
+
+  return (
+    <div className="relative">
+      <Input
+        id={id}
+        value={query}
+        placeholder="Search architectures…"
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {open && results.length > 0 && (
+        <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto border border-[var(--hud-border-default)] bg-[var(--hud-surface)] text-xs font-mono">
+          {results.map((m) => (
+            <li key={m}>
+              <button
+                type="button"
+                className={`block w-full px-2 py-1 text-left hover:bg-[var(--hud-bg-hover)] ${m === value ? 'text-[var(--hud-accent)]' : 'text-[var(--hud-text-data)]'}`}
+                onMouseDown={() => {
+                  onChange(m);
+                  setQuery(m);
+                  setOpen(false);
+                }}
+              >
+                {m}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function HpField({
   field,
   value,
   onChange,
+  frameworkKey,
+  task,
 }: {
   field: FieldDef;
   value: number | boolean | string;
   onChange: (v: number | boolean | string) => void;
+  frameworkKey: string;
+  task: string;
 }) {
   if (field.type === 'bool') {
     return (
@@ -336,10 +174,42 @@ function HpField({
         >
           {field.options!.map((o) => (
             <option key={o} value={o}>
-              {o}
+              {o || '(none)'}
             </option>
           ))}
         </Select>
+      </div>
+    );
+  }
+  if (field.type === 'model') {
+    return (
+      <div className="col-span-2 md:col-span-3">
+        <FieldLabel htmlFor={`hp-${field.key}`}>{field.label}</FieldLabel>
+        <SearchableModel
+          id={`hp-${field.key}`}
+          frameworkKey={frameworkKey}
+          task={task}
+          value={String(value)}
+          onChange={onChange}
+        />
+        {field.help && (
+          <p className="mt-1 text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">
+            {field.help}
+          </p>
+        )}
+      </div>
+    );
+  }
+  if (field.type === 'text') {
+    return (
+      <div>
+        <FieldLabel htmlFor={`hp-${field.key}`}>{field.label}</FieldLabel>
+        <Input
+          id={`hp-${field.key}`}
+          value={String(value)}
+          onChange={(e) => onChange(e.target.value)}
+          title={field.help}
+        />
       </div>
     );
   }
@@ -369,29 +239,65 @@ export default function ExperimentsNew() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [frameworks, setFrameworks] = useState<FrameworkCapabilities[]>([]);
   const [run, setRun] = useState({
     projectId: preselectedProject,
     datasetId: '',
     datasetVersionId: '',
     name: 'Baseline',
-    task: 'detect',
-    baseModel: 'yolov8n.pt',
+    framework: '',
+    task: '',
+    baseModel: '',
     clusterId: '',
     device: 'cpu',
   });
-  const [params, setParams] = useState<Record<string, number | boolean | string>>(buildDefaults());
+  const [params, setParams] = useState<Record<string, number | boolean | string>>({});
   const [splitCfg, setSplitCfg] = useState<SplitConfig>(DEFAULT_SPLIT);
-  const [open, setOpen] = useState<Record<string, boolean>>({ Core: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  const caps = useMemo(
+    () => frameworks.find((f) => f.key === run.framework),
+    [frameworks, run.framework],
+  );
 
   useEffect(() => {
     apiGet<{ items: Project[] }>('/api/projects?page=1&page_size=200')
       .then((d) => setProjects(d.items || []))
       .catch(console.error);
   }, []);
+
+  // Load the available training frameworks and initialise the form from the
+  // first one (default Ultralytics, so the page looks unchanged for YOLO users).
+  useEffect(() => {
+    apiGet<{ items: FrameworkCapabilities[] }>('/api/training/frameworks')
+      .then((d) => {
+        const items = d.items || [];
+        setFrameworks(items);
+        const def = items.find((f) => f.key === 'ultralytics') || items[0];
+        if (def) selectFramework(def, items);
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load frameworks'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function selectFramework(fw: FrameworkCapabilities, all?: FrameworkCapabilities[]) {
+    const task = fw.supported_tasks[0] || 'classify';
+    const models = fw.models_by_task[task] || [];
+    setRun((r) => ({
+      ...r,
+      framework: fw.key,
+      task,
+      baseModel: hasModelField(fw.groups) ? '' : models[0] || '',
+      device: fw.device_options[0] || 'cpu',
+    }));
+    setParams(buildDefaults(fw.groups));
+    setOpen({ [fw.groups[0]?.title || '']: true });
+    void all;
+  }
 
   useEffect(() => {
     if (!run.projectId) {
@@ -408,7 +314,7 @@ export default function ExperimentsNew() {
   }
 
   function resetGroup(title: string) {
-    const group = GROUPS.find((g) => g.title === title);
+    const group = caps?.groups.find((g) => g.title === title);
     if (!group) return;
     setParams((prev) => {
       const next = { ...prev };
@@ -417,14 +323,24 @@ export default function ExperimentsNew() {
     });
   }
 
+  function onTaskChange(task: string) {
+    const models = caps?.models_by_task[task] || [];
+    setRun((r) => ({
+      ...r,
+      task,
+      baseModel: caps && hasModelField(caps.groups) ? r.baseModel : models[0] || '',
+    }));
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!run.projectId) return setError('Select a project');
     if (!run.datasetVersionId) return setError('Select a dataset/version');
+    const usesModelField = caps ? hasModelField(caps.groups) : false;
+    const baseModel = usesModelField ? String(params.model ?? '') : run.baseModel;
     setLoading(true);
     setError(null);
     try {
-      // Persist the split first so what we train on matches what we visualize.
       if (run.datasetId && run.datasetVersionId) {
         try {
           await apiPost(
@@ -439,7 +355,8 @@ export default function ExperimentsNew() {
         projectId: run.projectId,
         datasetVersionId: run.datasetVersionId,
         task: run.task,
-        baseModel: run.baseModel,
+        framework: run.framework,
+        baseModel,
         name: run.name,
         clusterId: run.clusterId || null,
         params: {
@@ -476,6 +393,9 @@ export default function ExperimentsNew() {
     );
   }
 
+  const usesModelField = caps ? hasModelField(caps.groups) : false;
+  const baseModelOptions = caps?.models_by_task[run.task] || [];
+
   return (
     <div className="max-w-2xl space-y-0">
       <div className="flex items-center justify-between border-b border-[var(--hud-border-subtle)] pb-3 mb-4">
@@ -503,6 +423,39 @@ export default function ExperimentsNew() {
                 onChange={(e) => setRun((r) => ({ ...r, name: e.target.value }))}
                 placeholder="Baseline"
               />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <FieldLabel htmlFor="framework-select">Training Framework</FieldLabel>
+                <Select
+                  id="framework-select"
+                  value={run.framework}
+                  onChange={(e) => {
+                    const fw = frameworks.find((f) => f.key === e.target.value);
+                    if (fw) selectFramework(fw);
+                  }}
+                >
+                  {frameworks.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <FieldLabel htmlFor="task-select">Task</FieldLabel>
+                <Select
+                  id="task-select"
+                  value={run.task}
+                  onChange={(e) => onTaskChange(e.target.value)}
+                >
+                  {(caps?.supported_tasks || []).map((t) => (
+                    <option key={t} value={t}>
+                      {TASK_LABELS[t] || t}
+                    </option>
+                  ))}
+                </Select>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -555,47 +508,36 @@ export default function ExperimentsNew() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
+              {!usesModelField && (
+                <div>
+                  <FieldLabel htmlFor="base-model">Base Model</FieldLabel>
+                  <Select
+                    id="base-model"
+                    value={run.baseModel}
+                    onChange={(e) => setRun((r) => ({ ...r, baseModel: e.target.value }))}
+                  >
+                    {baseModelOptions.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
               <div>
-                <FieldLabel htmlFor="task-select">Task</FieldLabel>
+                <FieldLabel htmlFor="device">Device</FieldLabel>
                 <Select
-                  id="task-select"
-                  value={run.task}
-                  onChange={(e) => setRun((r) => ({ ...r, task: e.target.value }))}
+                  id="device"
+                  value={run.device}
+                  onChange={(e) => setRun((r) => ({ ...r, device: e.target.value }))}
                 >
-                  <option value="detect">Object Detection</option>
-                  <option value="classify">Classification</option>
-                  <option value="segment">Segmentation</option>
-                  <option value="pose">Pose Estimation</option>
-                </Select>
-              </div>
-              <div>
-                <FieldLabel htmlFor="base-model">Base Model</FieldLabel>
-                <Select
-                  id="base-model"
-                  value={run.baseModel}
-                  onChange={(e) => setRun((r) => ({ ...r, baseModel: e.target.value }))}
-                >
-                  {BASE_MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
+                  {(caps?.device_options || ['cpu']).map((d) => (
+                    <option key={d} value={d}>
+                      {d}
                     </option>
                   ))}
                 </Select>
               </div>
-            </div>
-            <div>
-              <FieldLabel htmlFor="device">Device</FieldLabel>
-              <Select
-                id="device"
-                value={run.device}
-                onChange={(e) => setRun((r) => ({ ...r, device: e.target.value }))}
-              >
-                {DEVICES.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </Select>
             </div>
           </div>
         </Section>
@@ -629,8 +571,8 @@ export default function ExperimentsNew() {
           </div>
         </Section>
 
-        {/* Hyperparameter groups */}
-        {GROUPS.map((g) => (
+        {/* Hyperparameter groups (rendered from the framework's capabilities) */}
+        {(caps?.groups || []).map((g) => (
           <Section
             key={g.title}
             title={g.title}
@@ -647,6 +589,8 @@ export default function ExperimentsNew() {
                     field={f}
                     value={params[f.key]}
                     onChange={(v) => setParam(f.key, v)}
+                    frameworkKey={run.framework}
+                    task={run.task}
                   />
                 ))}
               </div>

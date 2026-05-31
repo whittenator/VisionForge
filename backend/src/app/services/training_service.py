@@ -26,13 +26,25 @@ def launch_training(
     base_model: str = "yolov8n.pt",
     owner_id: str | None = None,
     cluster_id: str | None = None,
+    framework: str = "ultralytics",
 ) -> dict[str, Any]:
     # Reject obvious task/dataset mismatches so we don't burn cluster time on
     # a run we already know will fail (e.g. classify on a detection dataset).
     from app.models.dataset import Dataset
     from app.models.dataset_version import DatasetVersion
+    from app.services import training as training_pkg
 
     requested = (task or "").lower()
+
+    # The chosen framework must support the requested task (e.g. Timm is
+    # classification-only). Resolve through the registry so this stays generic.
+    try:
+        trainer = training_pkg.get_trainer(framework)
+    except training_pkg.registry.UnknownFrameworkError as exc:
+        raise TaskTypeMismatch(str(exc)) from exc
+    if requested and requested not in trainer.supported_tasks:
+        raise TaskTypeMismatch(f"framework '{trainer.key}' does not support task '{requested}'")
+
     if requested in ("detect", "classify"):
         version = db.get(DatasetVersion, dataset_version_id)
         dataset = db.get(Dataset, version.dataset_id) if version else None
@@ -41,9 +53,11 @@ def launch_training(
                 f"task '{requested}' does not match dataset task_type " f"'{dataset.task_type}'"
             )
 
-    # Build full params including task and base_model so the worker can read them
+    # Build full params including task, framework and base_model so the worker
+    # can read them.
     full_params = dict(params or {})
     full_params.setdefault("task", task)
+    full_params.setdefault("framework", trainer.key)
     full_params.setdefault("base_model", base_model)
 
     # If a cluster was selected, reserve it before creating the run so we fail
@@ -62,6 +76,7 @@ def launch_training(
         cluster_id=cluster_id,
         name=name,
         status="queued",
+        framework=trainer.key,
         params_json=json.dumps(full_params),
     )
     db.add(run)

@@ -107,11 +107,18 @@ def predict(
         f.write(image_bytes)
         img_path = f.name
     try:
-        if kind == "yolo":
-            return _yolo_predict(model, img_path, score_threshold)
         if kind == "onnx":
             return _onnx_predict(model, img_path, score_threshold)
-        raise InferenceError(f"unsupported model kind: {kind}")
+        if kind == "ultralytics":
+            return _yolo_predict(model, img_path, score_threshold)
+        # Any other framework (e.g. timm) is a classifier: delegate to its trainer.
+        from app.services import training as training_pkg
+
+        try:
+            cls_name, score = training_pkg.get_trainer(kind).predict_classification(model, img_path)
+            return {"detections": [], "classification": {"class": cls_name, "score": score}}
+        except NotImplementedError as exc:
+            raise InferenceError(f"unsupported model kind: {kind}") from exc
     finally:
         try:
             os.unlink(img_path)
@@ -149,12 +156,16 @@ def _load_artifact(artifact: ModelArtifact) -> tuple[str, Any, Path]:
             scratch,
         )
 
+    # PyTorch weights: resolve the producing framework via the trainer registry
+    # (no hard-coded library). ``kind`` becomes the framework key.
+    from app.services import training as training_pkg
+
     try:
-        from ultralytics import YOLO  # type: ignore
-    except Exception as exc:  # pragma: no cover
+        trainer = training_pkg.get_trainer(getattr(artifact, "framework", None))
+        return (trainer.key, trainer.load_predictor(local), scratch)
+    except Exception as exc:  # pragma: no cover - depends on optional ML wheels
         _safe_rmtree(scratch)
-        raise InferenceError("ultralytics not installed") from exc
-    return ("yolo", YOLO(str(local)), scratch)
+        raise InferenceError(f"could not load model: {exc}") from exc
 
 
 def _download_to(uri: str, dest: Path) -> bool:

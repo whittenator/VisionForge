@@ -24,6 +24,9 @@ class ModelArtifact(Base):
     version: Mapped[str] = mapped_column(String(32), nullable=False, default="1")
     type: Mapped[str] = mapped_column(String(50), nullable=False)  # pytorch, onnx
     format: Mapped[str] = mapped_column(String(32), nullable=False, default="pytorch")
+    # Training library that produced this artifact (ultralytics | timm | …).
+    # Lets inference/export route to the right loader without inspecting weights.
+    framework: Mapped[str | None] = mapped_column(String(32), nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
     size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)  # MinIO key
