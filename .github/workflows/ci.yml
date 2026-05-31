@@ -43,7 +43,9 @@ jobs:
         env:
           SKIP_DB_MIGRATIONS: "1"
         working-directory: backend
-        run: pytest -q tests/unit/
+        # addopts in pyproject.toml already enables --cov=app; the floor here
+        # locks in current coverage and is meant to be ratcheted upward.
+        run: pytest -q tests/unit/ --cov-fail-under=62
 
   frontend:
     name: Frontend (lint + build)
@@ -65,6 +67,9 @@ jobs:
 
       - name: ESLint
         run: npm run lint
+
+      - name: Unit tests (vitest)
+        run: npm run test:unit
 
       - name: Build
         run: npm run build
