@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  // Playwright owns the *.spec.ts e2e/visual suites; Vitest unit tests live in
+  // tests/unit/*.test.ts and must not be picked up by the browser runner.
+  testMatch: '**/*.spec.ts',
   fullyParallel: true,
   retries: 0,
   reporter: [['list']],
