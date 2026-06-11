@@ -70,7 +70,9 @@ def apply_prelabels(payload: dict) -> dict:
                 db.query(Asset)
                 .filter(
                     Asset.version_id == dataset_version_id,
-                    Asset.label_status == "unlabelled",
+                    # Accept the legacy UK spelling for rows predating the
+                    # normalization migration.
+                    Asset.label_status.in_(("unlabeled", "unlabelled")),
                 )
                 .all()
             )

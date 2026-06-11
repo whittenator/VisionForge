@@ -229,7 +229,7 @@ export default function ExperimentDetail() {
         if (artId && runData.status === 'succeeded') {
           apiGet<{ evaluations?: typeof evals }>(`/api/artifacts/models/${artId}/lineage`)
             .then((d) => setEvals(d.evaluations || []))
-            .catch(() => {});
+            .catch((err) => console.warn('Failed to load evaluations for run', err));
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load run');
@@ -239,7 +239,12 @@ export default function ExperimentDetail() {
     poll();
     const interval = setInterval(() => {
       const s = statusRef.current;
-      if (s === 'running' || s === 'queued') poll();
+      if (s === 'running' || s === 'queued') {
+        poll();
+      } else if (s !== undefined) {
+        // Terminal state (succeeded / failed / …) — stop polling for good.
+        clearInterval(interval);
+      }
     }, 3000);
     return () => clearInterval(interval);
   }, [runId]);

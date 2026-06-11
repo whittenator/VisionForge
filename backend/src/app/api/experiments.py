@@ -8,11 +8,23 @@ from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
 from app.models.experiment import ExperimentRun as ExperimentModel
+from app.models.project import Project
 from app.models.user import User
+from app.models.workspace import Membership, Role
 from app.schemas.experiment import Experiment as ExperimentSchema
 from app.schemas.experiment import ExperimentCreate
+from app.services import authz
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
+
+
+def _member_workspace_ids(db: Session, user: User) -> list[str]:
+    ws_ids = {
+        m.workspace_id
+        for m in db.scalars(select(Membership).where(Membership.user_id == user.id)).all()
+    }
+    ws_ids.add(authz.DEFAULT_WORKSPACE_ID)
+    return list(ws_ids)
 
 
 def _run_to_schema(e: ExperimentModel) -> ExperimentSchema:
@@ -42,7 +54,12 @@ def list_runs(
 ):
     base = select(ExperimentModel)
     if project_id:
+        authz.require_project_access(db, current_user, project_id, Role.VIEWER)
         base = base.where(ExperimentModel.project_id == project_id)
+    elif not authz.is_superuser(db, current_user):
+        base = base.join(Project, ExperimentModel.project_id == Project.id).where(
+            Project.workspace_id.in_(_member_workspace_ids(db, current_user))
+        )
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     offset = (page - 1) * page_size
     rows = list(
@@ -67,6 +84,7 @@ def get_run(
     e = db.get(ExperimentModel, runId)
     if not e:
         raise HTTPException(status_code=404, detail="Run not found")
+    authz.require_project_access(db, current_user, e.project_id, Role.VIEWER)
     return _run_to_schema(e)
 
 
@@ -76,6 +94,7 @@ def create_run(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_project_access(db, current_user, body.project_id, Role.DEVELOPER)
     run = ExperimentModel(
         project_id=body.project_id,
         dataset_version_id=body.dataset_version_id,
@@ -100,6 +119,7 @@ def get_metrics(
     e = db.get(ExperimentModel, runId)
     if not e:
         raise HTTPException(status_code=404, detail="Run not found")
+    authz.require_project_access(db, current_user, e.project_id, Role.VIEWER)
     metrics: list = []
     summary: dict | None = None
     plots: list = []
@@ -169,6 +189,8 @@ def get_plot(
     from fastapi.responses import StreamingResponse
 
     e = db.get(ExperimentModel, runId)
+    if e:
+        authz.require_project_access(db, current_user, e.project_id, Role.VIEWER)
     if not e or not e.metrics_json:
         raise HTTPException(status_code=404, detail="Run or plots not found")
     try:

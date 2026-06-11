@@ -4,7 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
+from app.models.dataset_version import DatasetVersion
+from app.models.experiment import ExperimentRun
 from app.models.user import User
+from app.models.workspace import Role
 from app.schemas.common import (
     Job,
     OnnxExportRequest,
@@ -12,7 +15,7 @@ from app.schemas.common import (
     UploadUrlRequest,
     UploadUrlResponse,
 )
-from app.services import cluster_service
+from app.services import authz, cluster_service
 from app.services.ingest_service import get_presigned_upload
 from app.services.onnx_service import OnnxDispatchError
 from app.services.onnx_service import export_onnx as svc_export_onnx
@@ -24,8 +27,12 @@ router = APIRouter(prefix="/api", tags=["ops"])
 @router.post("/ingest/upload-url", response_model=UploadUrlResponse)
 def get_upload_url(
     payload: UploadUrlRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    version = db.get(DatasetVersion, payload.datasetVersionId)
+    if version is not None:
+        authz.require_dataset_access(db, current_user, version.dataset_id, Role.DEVELOPER)
     data = get_presigned_upload(payload.datasetVersionId, payload.filename, payload.contentType)
     # Derive the objectKey using the same path template as storage.presign_put_url
     object_key = f"datasets/{payload.datasetVersionId}/{payload.filename}"
@@ -42,6 +49,10 @@ def train(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_project_access(db, current_user, payload.projectId, Role.DEVELOPER)
+    version = db.get(DatasetVersion, payload.datasetVersionId)
+    if version is not None:
+        authz.require_dataset_access(db, current_user, version.dataset_id, Role.DEVELOPER)
     try:
         job = launch_training(
             db,
@@ -68,6 +79,9 @@ def export_onnx(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    run = db.get(ExperimentRun, payload.experimentId)
+    if run is not None:
+        authz.require_project_access(db, current_user, run.project_id, Role.DEVELOPER)
     try:
         job = svc_export_onnx(
             db, payload.experimentId, payload.dynamicAxes, cluster_id=payload.clusterId
@@ -157,6 +171,7 @@ def trigger_frame_extraction(
     current_user: User = Depends(get_current_user),
 ):
     """Queue a frame-extraction Celery task for a video asset."""
+    authz.require_dataset_access(db, current_user, dataset_id, Role.DEVELOPER)
     from app.jobs.celery_app import celery_app
     from app.models.asset import Asset
     from app.services.jobs_service import create_job, update_job_status

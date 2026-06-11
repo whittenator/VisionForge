@@ -3,6 +3,7 @@ import os
 import sys
 from collections.abc import Generator
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -63,3 +64,61 @@ def override_get_db() -> Generator:
 
 app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
+
+
+# Many tests attach datasets/runs to a project id of "p" and exercise endpoints
+# as a fake user. Object-level authz resolves a resource -> project -> workspace,
+# so that project must exist in an accessible workspace. The default workspace
+# (all-zero UUID) is open to every authenticated user, so seed "p" there.
+DEFAULT_WORKSPACE_ID = "00000000-0000-0000-0000-000000000000"
+try:
+    from app.models.project import Project as _Project
+
+    with TestingSessionLocal() as _db:
+        if not _db.get(_Project, "p"):
+            _db.add(
+                _Project(
+                    id="p",
+                    name="Test Project",
+                    slug="test-project-p",
+                    workspace_id=DEFAULT_WORKSPACE_ID,
+                )
+            )
+            _db.commit()
+except Exception:
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_celery(monkeypatch):
+    """Unit tests must not reach a real broker.
+
+    Patch ``celery_app.send_task`` to a no-op so job-launch services create
+    their Job row and return "queued" without enqueueing (the dispatch-failure
+    path is covered explicitly where it matters).
+    """
+    from unittest.mock import MagicMock
+
+    from app.jobs import celery_app as _celery_mod
+
+    monkeypatch.setattr(
+        _celery_mod.celery_app, "send_task", MagicMock(return_value=None), raising=False
+    )
+    yield
+
+
+def ensure_project(project_id: str, *, workspace_id: str = DEFAULT_WORKSPACE_ID) -> None:
+    """Create a project (in the default, open workspace) if it doesn't exist."""
+    from app.models.project import Project as _Project
+
+    with TestingSessionLocal() as db:
+        if not db.get(_Project, project_id):
+            db.add(
+                _Project(
+                    id=project_id,
+                    name=f"Project {project_id[:8]}",
+                    slug=f"proj-{project_id[:12]}",
+                    workspace_id=workspace_id,
+                )
+            )
+            db.commit()

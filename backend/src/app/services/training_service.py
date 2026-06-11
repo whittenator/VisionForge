@@ -16,6 +16,14 @@ class TaskTypeMismatch(Exception):
     """Raised when a training run's task disagrees with its dataset's task_type."""
 
 
+class TrainingDispatchError(Exception):
+    """Raised when the training Celery task can't be dispatched.
+
+    The job row and run are marked ``failed`` and any cluster reservation is
+    released before this is raised, so nothing is left permanently queued/busy.
+    """
+
+
 def launch_training(
     db: Session,
     project_id: str,
@@ -106,8 +114,10 @@ def launch_training(
             db.add(cluster)
             db.commit()
 
-    # Enqueue async job; if broker not available, we still return a job id for contract.
-    # When a cluster is selected, route to its dedicated queue so only its agent picks it up.
+    # Enqueue async job. When a cluster is selected, route to its dedicated
+    # queue so only its agent picks it up. If dispatch fails (broker down),
+    # fail the job/run and release the cluster — otherwise the job sits
+    # "queued" forever and the cluster stays "busy" (see onnx_service).
     queue = f"cluster.{cluster_id}" if cluster_id else None
     try:
         send_kwargs: dict[str, Any] = {"args": [payload]}
@@ -115,8 +125,26 @@ def launch_training(
             send_kwargs["queue"] = queue
         celery_app.send_task("app.jobs.tasks.training.train_task", **send_kwargs)
         job_id = job_row.id
-    except Exception:
-        job_id = job_row.id
+    except Exception as exc:
+        from app.services.jobs_service import update_job_status
+
+        if cluster_id:
+            try:
+                cluster_service.release_cluster(db, cluster_id)
+            except Exception:
+                pass
+        try:
+            update_job_status(db, job_row.id, status="failed", progress=0.0)
+        except Exception:
+            pass
+        try:
+            run.status = "failed"
+            run.metrics_json = json.dumps({"error": f"task dispatch failed: {exc}"})
+            db.add(run)
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise TrainingDispatchError(f"failed to dispatch training task: {exc}") from exc
 
     return {
         "id": job_id,

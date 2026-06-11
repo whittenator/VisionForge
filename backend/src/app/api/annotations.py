@@ -5,9 +5,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
-from app.models.annotation import REVIEW_STATUSES
+from app.models.annotation import REVIEW_STATUSES, Annotation
+from app.models.asset import Asset
 from app.models.user import User
-from app.services import inference_service, suggestion_service
+from app.models.workspace import Role
+from app.services import authz, inference_service, suggestion_service
 from app.services.annotation_service import (
     AnnotationError,
     VersionConflictError,
@@ -25,6 +27,23 @@ from app.services.annotation_service import (
 )
 
 router = APIRouter(prefix="/api/annotations", tags=["annotations"])
+
+
+def _require_asset_dataset_access(db: Session, user: User, asset_id: str, min_role: Role) -> None:
+    """Enforce dataset-level access for an asset.
+
+    Missing assets are left for the service layer to report (it already
+    returns its own 400/404s), so existing status codes are preserved.
+    """
+    asset = db.get(Asset, asset_id)
+    if asset is not None:
+        authz.require_dataset_access(db, user, asset.dataset_id, min_role)
+
+
+def _require_annotation_access(db: Session, user: User, annotation_id: str, min_role: Role) -> None:
+    ann = db.get(Annotation, annotation_id)
+    if ann is not None:
+        _require_asset_dataset_access(db, user, ann.asset_id, min_role)
 
 
 class AnnotationCreate(BaseModel):
@@ -72,6 +91,7 @@ def create(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_asset_dataset_access(db, current_user, body.asset_id, Role.ANNOTATOR)
     try:
         ann = create_annotation(
             db,
@@ -93,6 +113,7 @@ def update(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_annotation_access(db, current_user, annotation_id, Role.ANNOTATOR)
     try:
         ann = update_annotation(
             db,
@@ -116,6 +137,7 @@ def delete(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_annotation_access(db, current_user, annotation_id, Role.ANNOTATOR)
     if not delete_annotation(db, annotation_id):
         raise HTTPException(status_code=404, detail="Annotation not found")
 
@@ -133,6 +155,19 @@ def bulk(
     UI can highlight conflicts (HTTP 409 equivalents) without rolling back
     successful entries.
     """
+    asset_ids = {c.asset_id for c in body.creates}
+    ann_ids = {u.id for u in body.updates} | set(body.deletes)
+    for ann_id in ann_ids:
+        ann = db.get(Annotation, ann_id)
+        if ann is not None:
+            asset_ids.add(ann.asset_id)
+    dataset_ids: set[str] = set()
+    for asset_id in asset_ids:
+        asset = db.get(Asset, asset_id)
+        if asset is not None:
+            dataset_ids.add(asset.dataset_id)
+    for dataset_id in dataset_ids:
+        authz.require_dataset_access(db, current_user, dataset_id, Role.ANNOTATOR)
     return bulk_save(
         db,
         author_id=current_user.id,
@@ -154,6 +189,7 @@ def review(
             status_code=400,
             detail=f"review_status must be one of {list(REVIEW_STATUSES)}",
         )
+    _require_annotation_access(db, current_user, annotation_id, Role.ANNOTATOR)
     try:
         ann = set_review(
             db,
@@ -177,6 +213,7 @@ def history(
 ):
     import json as _json
 
+    _require_annotation_access(db, current_user, annotation_id, Role.VIEWER)
     rows = get_history(db, annotation_id)
     out = []
     for h in rows:
@@ -197,6 +234,7 @@ def list_for_asset(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_asset_dataset_access(db, current_user, asset_id, Role.VIEWER)
     anns = get_asset_annotations(db, asset_id)
     return [_ann_dict(a) for a in anns]
 
@@ -207,6 +245,7 @@ def mark_labeled(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_asset_dataset_access(db, current_user, asset_id, Role.ANNOTATOR)
     mark_asset_labeled(db, asset_id)
     return {"status": "labeled"}
 
@@ -223,6 +262,7 @@ def review_queue(
     current_user: User = Depends(get_current_user),
 ):
     """List annotations for a dataset's review queue."""
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
     try:
         items, total = list_review_queue(
             db,
@@ -245,6 +285,7 @@ def review_queue_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
     return review_summary(db, dataset_id=dataset_id, version_id=version_id)
 
 
@@ -266,6 +307,7 @@ def suggest(
     accepted ones through the normal bulk path. 404 when no model is available,
     502 when inference fails.
     """
+    _require_asset_dataset_access(db, current_user, body.asset_id, Role.ANNOTATOR)
     try:
         artifact, suggestions = suggestion_service.suggest_annotations(
             db,
@@ -305,6 +347,7 @@ def suggest_artifacts(
     current_user: User = Depends(get_current_user),
 ):
     """List models trained on this dataset, newest first (override dropdown)."""
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
     arts = suggestion_service.candidate_artifacts_for_dataset(db, dataset_id)
     return {
         "items": [
@@ -340,10 +383,14 @@ def queue_error_mining(
     from app.models.dataset_version import DatasetVersion
     from app.services.jobs_service import create_job, update_job_status
 
-    if not db.get(ModelArtifact, body.artifact_id):
+    artifact = db.get(ModelArtifact, body.artifact_id)
+    if not artifact:
         raise HTTPException(status_code=400, detail="artifact not found")
-    if not db.get(DatasetVersion, body.dataset_version_id):
+    version = db.get(DatasetVersion, body.dataset_version_id)
+    if not version:
         raise HTTPException(status_code=400, detail="dataset version not found")
+    authz.require_project_access(db, current_user, artifact.project_id, Role.DEVELOPER)
+    authz.require_dataset_access(db, current_user, version.dataset_id, Role.DEVELOPER)
 
     payload = {
         "artifactId": body.artifact_id,

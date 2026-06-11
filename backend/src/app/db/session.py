@@ -12,11 +12,15 @@ except Exception:
 
 
 def _db_url() -> str:
+    from app.settings import require_secure_setting
+
     url = os.getenv("DATABASE_URL")
     if url:
         return url
     user = os.getenv("POSTGRES_USER", "visionforge")
-    pwd = os.getenv("POSTGRES_PASSWORD", "change-me")
+    pwd = require_secure_setting(
+        "POSTGRES_PASSWORD", os.getenv("POSTGRES_PASSWORD", "change-me"), ("change-me",)
+    )
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     db = os.getenv("POSTGRES_DB", "visionforge")

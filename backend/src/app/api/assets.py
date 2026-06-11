@@ -8,9 +8,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
+from app.models.dataset_version import DatasetVersion
 from app.models.user import User
+from app.models.workspace import Role
 from app.schemas.split import SplitConfig, SplitSummary
-from app.services import split_service
+from app.services import authz, split_service
 from app.services.annotation_service import get_asset_annotations
 from app.services.asset_service import (
     confirm_upload,
@@ -31,6 +33,20 @@ class ConfirmUploadRequest(BaseModel):
     content_type: str = "image/jpeg"
     width: int | None = None
     height: int | None = None
+
+
+def _require_version_dataset_access(
+    db: Session,
+    user: User,
+    dataset_id: str,
+    version_id: str,
+    min_role: Role,
+) -> None:
+    """Enforce access against the version's *actual* owning dataset when it
+    resolves, falling back to the dataset id from the path/body otherwise."""
+    version = db.get(DatasetVersion, version_id)
+    owner = version.dataset_id if version is not None else dataset_id
+    authz.require_dataset_access(db, user, owner, min_role)
 
 
 def _presign_download(uri: str) -> str:
@@ -56,6 +72,7 @@ def get(
     asset = get_asset(db, asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
+    authz.require_dataset_access(db, current_user, asset.dataset_id, Role.VIEWER)
     download_url = _presign_download(asset.uri)
     meta: dict = {}
     if asset.meta_data:
@@ -84,6 +101,9 @@ def get_annotations(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    asset = get_asset(db, asset_id)
+    if asset is not None:
+        authz.require_dataset_access(db, current_user, asset.dataset_id, Role.VIEWER)
     anns = get_asset_annotations(db, asset_id)
     return [
         {
@@ -110,6 +130,7 @@ def list_dataset_assets(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
     assets, total = list_assets(
         db,
         dataset_id,
@@ -148,6 +169,7 @@ def get_version_split(
     current_user: User = Depends(get_current_user),
 ):
     """Return persisted train/val/test counts and per-class breakdown for a version."""
+    _require_version_dataset_access(db, current_user, dataset_id, version_id, Role.VIEWER)
     return split_service.get_split_summary(db, version_id)
 
 
@@ -160,6 +182,7 @@ def assign_version_split(
     current_user: User = Depends(get_current_user),
 ):
     """Deterministically (re)assign and persist the split for every asset in a version."""
+    _require_version_dataset_access(db, current_user, dataset_id, version_id, Role.DEVELOPER)
     try:
         return split_service.assign_splits(
             db,
@@ -181,6 +204,7 @@ def dataset_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
     return get_dataset_stats(db, dataset_id, version_id=version_id)
 
 
@@ -192,6 +216,7 @@ def dataset_metrics(
     current_user: User = Depends(get_current_user),
 ):
     """Detailed dataset health metrics for the metrics dashboard."""
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
     return get_dataset_metrics(db, dataset_id, version_id=version_id)
 
 
@@ -215,6 +240,7 @@ def get_asset_neighbors(
     asset = db.get(Asset, asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
+    authz.require_dataset_access(db, current_user, asset.dataset_id, Role.VIEWER)
 
     base_filters = [Asset.dataset_id == asset.dataset_id]
     if asset.version_id:
@@ -280,6 +306,10 @@ def confirm_asset_upload(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_dataset_access(db, current_user, body.dataset_id, Role.DEVELOPER)
+    version = db.get(DatasetVersion, body.version_id)
+    if version is not None and version.dataset_id != body.dataset_id:
+        authz.require_dataset_access(db, current_user, version.dataset_id, Role.DEVELOPER)
     asset = confirm_upload(
         db,
         dataset_id=body.dataset_id,

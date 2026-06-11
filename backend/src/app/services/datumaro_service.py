@@ -262,7 +262,7 @@ def _import_yolo(
             mime_type=_guess_mime(img_path.name),
             width=w,
             height=h,
-            label_status="labeled" if label_path else "unlabelled",
+            label_status="labeled" if label_path else "unlabeled",
             meta_data=json.dumps({"filename": img_path.name}),
         )
         db.add(asset)
@@ -337,7 +337,7 @@ def _import_via_datumaro(
             mime_type=_guess_mime(uri),
             width=w,
             height=h,
-            label_status="labeled" if item.annotations else "unlabelled",
+            label_status="labeled" if item.annotations else "unlabeled",
             meta_data=json.dumps({"filename": str(path) if path else item.id}),
         )
         db.add(asset)

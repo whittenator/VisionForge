@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
@@ -19,13 +19,14 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    # bcrypt only considers the first 72 bytes; cap input well below that.
+    password: str = Field(min_length=1, max_length=128)
 
 
 class SignupRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=255)
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8, max_length=128)
     acceptTerms: bool
 
 
@@ -114,7 +115,7 @@ def signup(req: SignupRequest, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/refresh", response_model=AccessTokenResponse)
-def refresh_token(req: TokenRefreshRequest) -> dict:
+def refresh_token(req: TokenRefreshRequest, db: Session = Depends(get_db)) -> dict:
     payload = auth_service.decode_token(req.refresh_token)
     if payload is None or payload.get("type") != "refresh":
         raise HTTPException(
@@ -129,7 +130,15 @@ def refresh_token(req: TokenRefreshRequest) -> dict:
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = auth_service.create_access_token(user_id, payload.get("email", ""))
+    # The user must still exist: refresh tokens outlive account deletion.
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User no longer exists",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token = auth_service.create_access_token(user.id, user.email)
     return {"access_token": access_token, "token_type": "bearer"}
 
 

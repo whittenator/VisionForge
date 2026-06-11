@@ -86,7 +86,17 @@ def test_extract_frames_rejects_non_video_asset():
 
 def test_extract_frames_rejects_mismatched_dataset():
     _, asset_id = _seed_asset(mime="video/mp4", uri="x/y.mp4")
-    r = client.post(f"/api/datasets/wrong-dataset/assets/{asset_id}/extract-frames")
+    # A real but different dataset (so authz passes and the endpoint's own
+    # "asset does not belong to dataset" guard is what rejects the request).
+    other_db = TestingSessionLocal()
+    try:
+        other = Dataset(id=str(uuid.uuid4()), project_id="p", name="other")
+        other_db.add(other)
+        other_db.commit()
+        other_id = other.id
+    finally:
+        other_db.close()
+    r = client.post(f"/api/datasets/{other_id}/assets/{asset_id}/extract-frames")
     assert r.status_code == 400
 
 

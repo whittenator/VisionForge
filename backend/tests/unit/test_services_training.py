@@ -6,7 +6,12 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
 from app.models.experiment import ExperimentRun
-from app.services.training_service import TaskTypeMismatch, launch_training
+from app.models.job import Job
+from app.services.training_service import (
+    TaskTypeMismatch,
+    TrainingDispatchError,
+    launch_training,
+)
 
 
 def _session():
@@ -64,5 +69,27 @@ def test_launch_training_rejects_unsupported_task_for_framework():
             launch_training(
                 db, project_id="p1", dataset_version_id="dv1", task="detect", framework="timm"
             )
+    finally:
+        db.close()
+
+
+def test_launch_training_fails_job_when_dispatch_fails(monkeypatch):
+    """If the broker can't be reached, the job is failed (not left queued)."""
+    from app.jobs import celery_app as _celery_mod
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("broker down")
+
+    monkeypatch.setattr(_celery_mod.celery_app, "send_task", _boom, raising=False)
+
+    db = _session()
+    try:
+        with pytest.raises(TrainingDispatchError):
+            launch_training(db, project_id="p1", dataset_version_id="dv1", task="detect")
+        # No phantom queued jobs left behind.
+        jobs = db.query(Job).all()
+        assert jobs and all(j.status == "failed" for j in jobs)
+        runs = db.query(ExperimentRun).all()
+        assert runs and all(r.status == "failed" for r in runs)
     finally:
         db.close()

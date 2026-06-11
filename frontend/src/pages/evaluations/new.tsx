@@ -39,14 +39,20 @@ export default function EvaluationsNew() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiGet<{ items: ModelArtifact[] }>('/api/artifacts/models?page=1&page_size=200')
-      .then((d) => setModels(d.items || []))
-      .catch(() => {});
-    apiGet<{ items: DatasetSummary[] }>('/api/datasets?page=1&page_size=200')
-      .then((d) => setDatasets(d.items || []))
-      .catch(() => {});
+    Promise.all([
+      apiGet<{ items: ModelArtifact[] }>('/api/artifacts/models?page=1&page_size=200'),
+      apiGet<{ items: DatasetSummary[] }>('/api/datasets?page=1&page_size=200'),
+    ])
+      .then(([m, d]) => {
+        setModels(m.items || []);
+        setDatasets(d.items || []);
+      })
+      .catch((err) =>
+        setLoadError(err instanceof Error ? err.message : 'Failed to load models and datasets'),
+      );
   }, []);
 
   function setField<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
@@ -83,7 +89,7 @@ export default function EvaluationsNew() {
           iou_threshold: form.iou_threshold,
           score_threshold: form.score_threshold,
           sample_fpfn_count: form.sample_fpfn_count,
-        }
+        },
       );
       if (!job.evaluationId) {
         throw new Error('server response missing evaluationId');
@@ -111,6 +117,8 @@ export default function EvaluationsNew() {
         </Link>
       </div>
 
+      {loadError && <Alert variant="error">Failed to load models and datasets: {loadError}</Alert>}
+
       <form onSubmit={onSubmit} className="space-y-3">
         <div>
           <label className="label-overline block mb-1">Model artifact</label>
@@ -134,11 +142,7 @@ export default function EvaluationsNew() {
           >
             <option value="">— select —</option>
             {datasets.map((d) => (
-              <option
-                key={d.id}
-                value={d.latest_version_id || ''}
-                disabled={!d.latest_version_id}
-              >
+              <option key={d.id} value={d.latest_version_id || ''} disabled={!d.latest_version_id}>
                 {d.name}
                 {!d.latest_version_id ? ' (no versions yet)' : ''}
               </option>

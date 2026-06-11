@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from fastapi import Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,9 +32,11 @@ def require_role(min_role: Role):
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db),
     ) -> User:
-        # Superusers bypass all role checks
-        superuser_email = os.getenv("FIRST_SUPERUSER_EMAIL") or os.getenv("SUPERUSER_EMAIL")
-        if superuser_email and current_user.email == superuser_email:
+        # Superusers bypass all role checks (column-backed, with the seed
+        # admin's env-var email kept as a fallback for pre-column users).
+        from app.services.authz import is_superuser
+
+        if is_superuser(db, current_user):
             return current_user
 
         membership = db.scalar(

@@ -9,7 +9,8 @@ from app.db.deps import get_current_user, get_db
 from app.models.dataset import Dataset
 from app.models.project import Project as ProjectModel
 from app.models.user import User
-from app.models.workspace import Membership, Workspace
+from app.models.workspace import Membership, Role, Workspace
+from app.services.authz import require_project_access, require_workspace_access
 from app.services.project_dataset_service import (
     VALID_TASK_TYPES,
 )
@@ -78,6 +79,7 @@ def list_projects(
 
     base = select(ProjectModel)
     if workspace_id:
+        require_workspace_access(db, current_user, workspace_id)
         base = base.where(ProjectModel.workspace_id == workspace_id)
     else:
         base = base.where(ProjectModel.workspace_id.in_(ws_ids))
@@ -114,9 +116,7 @@ def get_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    p = db.get(ProjectModel, project_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = require_project_access(db, current_user, project_id)
     datasets = list(db.scalars(select(Dataset).where(Dataset.project_id == project_id)).all())
     return {
         "id": p.id,
@@ -140,6 +140,7 @@ def create_project(
     ws = db.get(Workspace, workspace_id)
     if not ws:
         workspace_id = _DEFAULT_WORKSPACE_ID
+    require_workspace_access(db, current_user, workspace_id, Role.DEVELOPER)
 
     if payload.task_type is not None and payload.task_type not in VALID_TASK_TYPES:
         raise HTTPException(
@@ -175,9 +176,7 @@ def update_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    p = db.get(ProjectModel, project_id)
-    if not p:
-        raise HTTPException(status_code=404, detail="Project not found")
+    p = require_project_access(db, current_user, project_id, Role.DEVELOPER)
     if payload.task_type is not None and payload.task_type not in VALID_TASK_TYPES:
         raise HTTPException(
             status_code=400,
@@ -222,6 +221,7 @@ def project_wizard(
     ws = db.get(Workspace, workspace_id)
     if not ws:
         workspace_id = _DEFAULT_WORKSPACE_ID
+    require_workspace_access(db, current_user, workspace_id, Role.DEVELOPER)
 
     import json as _json
 
@@ -287,6 +287,7 @@ def list_project_datasets(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_project_access(db, current_user, project_id)
     datasets = list(db.scalars(select(Dataset).where(Dataset.project_id == project_id)).all())
     return [
         {

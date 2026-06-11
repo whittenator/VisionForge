@@ -40,7 +40,12 @@ export default function ArtifactsPredict() {
 
   useEffect(() => {
     if (!modelId) return;
-    apiGet<ModelArtifact>(`/api/artifacts/models/${modelId}`).then(setModel).catch(() => {});
+    apiGet<ModelArtifact>(`/api/artifacts/models/${modelId}`)
+      .then(setModel)
+      .catch((err) => {
+        console.warn('Failed to load model artifact', err);
+        setError(err instanceof Error ? err.message : 'Failed to load model');
+      });
   }, [modelId]);
 
   useEffect(() => {
@@ -209,10 +214,8 @@ export default function ArtifactsPredict() {
           {result.result.top_class_index != null && (
             <div className="text-sm font-mono">
               <span className="text-[var(--hud-text-muted)]">Top index:</span>{' '}
-              <span className="text-[var(--hud-text-data)]">
-                {result.result.top_class_index}
-              </span>{' '}
-              ({((result.result.top_score || 0) * 100).toFixed(1)}%)
+              <span className="text-[var(--hud-text-data)]">{result.result.top_class_index}</span> (
+              {((result.result.top_score || 0) * 100).toFixed(1)}%)
             </div>
           )}
         </div>

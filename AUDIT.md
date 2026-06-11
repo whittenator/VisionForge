@@ -7,6 +7,39 @@ All findings below were verified against the code at the referenced locations.
 
 ---
 
+## 0. Remediation Status (this branch)
+
+All bugs and production-readiness items in §2–§4 and §6 have been fixed on
+`claude/cv-platform-audit-8god0a`. The §5 items that are net-new product
+features (per-project MinIO/S3 selection, duplicate-detection UI, training
+checkpoint/resume, the active-learning retraining loop) are intentionally left
+as roadmap work — the embedding storage groundwork for similarity/dedup is in
+place (pgvector column + index), but the search endpoints and UI are not.
+
+| Area | Fixed |
+|---|---|
+| Object-level authz across all resource routers (C1–C5) | ✅ shared `services/authz.py`; job endpoints authenticated |
+| Training dispatch failure leaves job queued / cluster busy (C6) | ✅ fails job + releases cluster + 502; new test |
+| Celery worker-death recovery (C7) | ✅ `acks_late`, `reject_on_worker_lost`, time limits + `maintenance.sweep_stale_jobs` beat task |
+| Fail-fast on default secrets (H1, H2) | ✅ `settings.require_secure_setting` (APP_ENV=production) |
+| `/auth/refresh` accepts deleted users (H3) | ✅ user existence re-checked |
+| In-memory auth rate limiting (H4) | ✅ Redis-backed with bounded fallback |
+| Snapshot asset count (H5) | ✅ counts the version being frozen |
+| Embeddings unqueryable / pgvector unused (H6) | ✅ `Asset.embedding` vector column + ANN index migration |
+| Frontend token refresh (H7) | ✅ single-flight 401 refresh-and-retry in `api.ts` |
+| AL `resolved_at` (H8) | ✅ set on resolve |
+| Agent token timing / heartbeat header (H9, M9) | ✅ `hmac.compare_digest`; bearer-header auth |
+| Training failure `dir()` guard (M1), CORS (M2), password bounds (M3) | ✅ |
+| Frontend polling after terminal state (M4), silent catches (M5), annotator desync (M6) | ✅ |
+| Migration concurrency (M7), agent supervisor respawn (M8) | ✅ advisory lock; backoff respawn |
+| label_status spelling (L1), superuser column (L2), nginx exposure (L3), compose limits/volumes (L4), error boundary (L5) | ✅ |
+
+Validation: backend 180 unit tests + new dispatch test pass; agent 20 tests
+pass; frontend builds, ESLint clean, 17 vitest tests pass, no new TypeScript
+errors; ruff/black clean; docker-compose config valid.
+
+---
+
 ## 1. Executive Summary
 
 The platform is further along than a typical prototype: annotation, dataset versioning/metrics, training with full hyperparameter + augmentation control, evaluation with per-class metrics/confusion matrices, model lineage, and ONNX export all work end-to-end from the UI. The biggest problems are:

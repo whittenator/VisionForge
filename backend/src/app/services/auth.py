@@ -12,8 +12,12 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.user import User
 from app.models.workspace import Workspace
+from app.settings import require_secure_setting
 
-SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production-32-chars-min")
+_DEFAULT_SECRET = "change-me-in-production-32-chars-min"
+SECRET_KEY: str = require_secure_setting(
+    "SECRET_KEY", os.getenv("SECRET_KEY", _DEFAULT_SECRET), (_DEFAULT_SECRET,)
+)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
@@ -169,9 +173,15 @@ def ensure_superuser() -> None:
     with SessionLocal() as db:
         existing = db.scalar(select(User).where(User.email == email))
         if existing:
+            changed = False
             # Re-hash if the stored hash is not bcrypt
             if not existing.password_hash or not _is_bcrypt_hash(existing.password_hash):
                 existing.password_hash = _hash_password(password)
+                changed = True
+            if not existing.is_superuser:
+                existing.is_superuser = True
+                changed = True
+            if changed:
                 db.add(existing)
                 db.commit()
             user = existing
@@ -180,6 +190,7 @@ def ensure_superuser() -> None:
                 email=email,
                 name="Administrator",
                 password_hash=_hash_password(password),
+                is_superuser=True,
             )
             db.add(user)
             db.commit()

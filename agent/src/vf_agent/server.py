@@ -10,6 +10,7 @@ Endpoints (all gated by `Authorization: Bearer $VF_AGENT_TOKEN`):
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Any
 
@@ -35,7 +36,8 @@ def _require_token(authorization: str | None = Header(default=None)) -> None:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing bearer token")
     presented = authorization.split(" ", 1)[1].strip()
-    if presented != expected:
+    # Constant-time comparison to avoid leaking token bytes via timing.
+    if not hmac.compare_digest(presented.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid agent token")
 
 

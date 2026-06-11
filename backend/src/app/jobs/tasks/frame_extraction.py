@@ -151,7 +151,7 @@ def extract_frames(payload: dict) -> dict:
                                     "timestamp_seconds": frame_num / video_fps,
                                 }
                             ),
-                            label_status="unlabelled",
+                            label_status="unlabeled",
                         )
                         db.add(frame_asset)
                         frame_assets.append(
