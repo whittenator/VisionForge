@@ -97,7 +97,7 @@ export default function DatasetReviewQueue() {
   useEffect(() => {
     apiGet<{ items: ArtifactLite[] }>('/api/artifacts/models?page=1&page_size=200')
       .then((r) => setArtifacts(r.items || []))
-      .catch(() => {});
+      .catch((err) => console.warn('Failed to load model artifacts for mining', err));
   }, []);
 
   function buildQuery(extra: Record<string, string | undefined> = {}) {
@@ -195,12 +195,11 @@ export default function DatasetReviewQueue() {
     <div className="space-y-4">
       <div className="border-b border-[var(--hud-border-subtle)] pb-3">
         <nav className="label-overline mb-1">
-          <Link to="/datasets" className="hover:text-[var(--hud-accent)]">DATASETS</Link>
+          <Link to="/datasets" className="hover:text-[var(--hud-accent)]">
+            DATASETS
+          </Link>
           <span className="mx-1.5 text-[var(--hud-border-strong)]">/</span>
-          <Link
-            to={`/datasets/${datasetId}`}
-            className="hover:text-[var(--hud-accent)]"
-          >
+          <Link to={`/datasets/${datasetId}`} className="hover:text-[var(--hud-accent)]">
             {datasetName.toUpperCase() || (datasetId || '').slice(0, 8).toUpperCase()}
           </Link>
           <span className="mx-1.5 text-[var(--hud-border-strong)]">/</span>
@@ -216,11 +215,11 @@ export default function DatasetReviewQueue() {
       {counts && (
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-[var(--hud-border-default)]">
           {[
-            { label: 'TOTAL',      value: counts.total,      filter: ''            },
-            { label: 'UNREVIEWED', value: counts.unreviewed, filter: 'unreviewed'  },
-            { label: 'APPROVED',   value: counts.approved,   filter: 'approved'    },
-            { label: 'REJECTED',   value: counts.rejected,   filter: 'rejected'    },
-            { label: 'FLAGGED',    value: counts.flagged,    filter: '__flagged__' },
+            { label: 'TOTAL', value: counts.total, filter: '' },
+            { label: 'UNREVIEWED', value: counts.unreviewed, filter: 'unreviewed' },
+            { label: 'APPROVED', value: counts.approved, filter: 'approved' },
+            { label: 'REJECTED', value: counts.rejected, filter: 'rejected' },
+            { label: 'FLAGGED', value: counts.flagged, filter: '__flagged__' },
           ].map((c) => {
             const isActive =
               c.filter === '__flagged__' ? flaggedFilter === 'true' : reviewStatus === c.filter;
@@ -265,7 +264,9 @@ export default function DatasetReviewQueue() {
           >
             <option value="">— all —</option>
             {versions.map((v) => (
-              <option key={v.id} value={v.id}>v{v.version}</option>
+              <option key={v.id} value={v.id}>
+                v{v.version}
+              </option>
             ))}
           </Select>
         </div>
@@ -318,11 +319,7 @@ export default function DatasetReviewQueue() {
               ))}
             </Select>
           </div>
-          <Button
-            onClick={runErrorMining}
-            disabled={mineRunning || !mineArtifactId}
-            size="md"
-          >
+          <Button onClick={runErrorMining} disabled={mineRunning || !mineArtifactId} size="md">
             {mineRunning ? 'Queuing…' : 'Run Error Mining'}
           </Button>
         </div>
@@ -337,7 +334,9 @@ export default function DatasetReviewQueue() {
       {error && <ErrorState title="Review queue error" description={error} />}
 
       {loading ? (
-        <div className="py-6"><Loading label="Loading queue…" /></div>
+        <div className="py-6">
+          <Loading label="Loading queue…" />
+        </div>
       ) : annotations.length === 0 ? (
         <EmptyState
           title="Queue is empty"
@@ -357,15 +356,9 @@ export default function DatasetReviewQueue() {
                     {ann.class_name && (
                       <span className="text-[var(--hud-text-primary)]">{ann.class_name}</span>
                     )}
-                    {ann.flagged && (
-                      <Badge variant="danger">FLAGGED</Badge>
-                    )}
-                    {ann.review_status === 'approved' && (
-                      <Badge variant="success">APPROVED</Badge>
-                    )}
-                    {ann.review_status === 'rejected' && (
-                      <Badge variant="danger">REJECTED</Badge>
-                    )}
+                    {ann.flagged && <Badge variant="danger">FLAGGED</Badge>}
+                    {ann.review_status === 'approved' && <Badge variant="success">APPROVED</Badge>}
+                    {ann.review_status === 'rejected' && <Badge variant="danger">REJECTED</Badge>}
                   </div>
                   <div className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)] mt-0.5 truncate">
                     asset {asset.id.slice(0, 12)}… · v{ann.version}
@@ -403,12 +396,7 @@ export default function DatasetReviewQueue() {
               </div>
             ))}
           </div>
-          <Pager
-            page={page}
-            pageSize={PAGE_SIZE}
-            total={total}
-            onChange={setPage}
-          />
+          <Pager page={page} pageSize={PAGE_SIZE} total={total} onChange={setPage} />
         </>
       )}
     </div>

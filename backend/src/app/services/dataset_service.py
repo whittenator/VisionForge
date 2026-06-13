@@ -35,7 +35,13 @@ def create_dataset(
 
 
 def snapshot_version(db: Session, dataset_id: str, notes: str | None = None) -> DatasetVersion:
-    """Create a new locked snapshot version for a dataset."""
+    """Create a new locked snapshot version for a dataset.
+
+    The snapshot freezes the dataset's current working set, so its
+    ``asset_count`` reflects the assets in the open (unlocked) version being
+    captured — not every asset that has ever belonged to the dataset across
+    all prior locked versions.
+    """
     # Compute next version number
     versions = list(
         db.scalars(
@@ -46,10 +52,17 @@ def snapshot_version(db: Session, dataset_id: str, notes: str | None = None) -> 
     )
     next_version = (versions[0].version + 1) if versions else 1
 
-    # Get current asset count for this dataset
-    current_assets = (
-        db.scalar(select(func.count(Asset.id)).where(Asset.dataset_id == dataset_id)) or 0
-    )
+    # Count assets in the working (unlocked) version being snapshotted. Fall
+    # back to the whole dataset only when no open version exists (legacy data).
+    open_version = next((v for v in versions if not v.locked), None)
+    if open_version is not None:
+        current_assets = (
+            db.scalar(select(func.count(Asset.id)).where(Asset.version_id == open_version.id)) or 0
+        )
+    else:
+        current_assets = (
+            db.scalar(select(func.count(Asset.id)).where(Asset.dataset_id == dataset_id)) or 0
+        )
 
     ver = DatasetVersion(
         dataset_id=dataset_id,

@@ -15,13 +15,34 @@ from app.models.dataset import Dataset
 from app.models.dataset_version import DatasetVersion
 from app.models.evaluation import Evaluation
 from app.models.experiment import ExperimentRun
+from app.models.project import Project
 from app.models.user import User
+from app.models.workspace import Membership, Role
 from app.schemas.common import Job
-from app.services import inference_service
+from app.services import authz, inference_service
 from app.services.onnx_service import OnnxDispatchError
 from app.services.onnx_service import export_onnx as svc_export_onnx
 
 router = APIRouter(prefix="/api", tags=["artifacts"])
+
+
+def _member_workspace_ids(db: Session, user: User) -> list[str]:
+    ws_ids = {
+        m.workspace_id
+        for m in db.scalars(select(Membership).where(Membership.user_id == user.id)).all()
+    }
+    ws_ids.add(authz.DEFAULT_WORKSPACE_ID)
+    return list(ws_ids)
+
+
+def _require_artifact_access(
+    db: Session, user: User, model_id: str, min_role: Role
+) -> ModelArtifact:
+    artifact = db.get(ModelArtifact, model_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Model not found")
+    authz.require_project_access(db, user, artifact.project_id, min_role)
+    return artifact
 
 
 def _artifact_dict(a: ModelArtifact) -> dict:
@@ -50,7 +71,12 @@ def list_models(
 ):
     base = select(ModelArtifact)
     if project_id:
+        authz.require_project_access(db, current_user, project_id, Role.VIEWER)
         base = base.where(ModelArtifact.project_id == project_id)
+    elif not authz.is_superuser(db, current_user):
+        base = base.join(Project, ModelArtifact.project_id == Project.id).where(
+            Project.workspace_id.in_(_member_workspace_ids(db, current_user))
+        )
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     offset = (page - 1) * page_size
     artifacts = list(
@@ -72,9 +98,7 @@ def get_model(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    artifact = db.get(ModelArtifact, model_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Model not found")
+    artifact = _require_artifact_access(db, current_user, model_id, Role.VIEWER)
     return {
         "id": artifact.id,
         "projectId": artifact.project_id,
@@ -105,9 +129,7 @@ def export_model(
 ):
     from app.services import cluster_service
 
-    artifact = db.get(ModelArtifact, model_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Model not found")
+    artifact = _require_artifact_access(db, current_user, model_id, Role.DEVELOPER)
     # Use the artifact's run_id as experiment_id for ONNX export
     experiment_id = artifact.run_id or model_id
     try:
@@ -136,9 +158,7 @@ def download_model(
     Falls back to streaming from the local filesystem if the storage_path is
     a local path (e.g. tests, sqlite-only environments).
     """
-    artifact = db.get(ModelArtifact, model_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Model not found")
+    artifact = _require_artifact_access(db, current_user, model_id, Role.VIEWER)
     if not artifact.storage_path:
         raise HTTPException(status_code=404, detail="artifact has no storage_path")
 
@@ -208,9 +228,7 @@ async def predict_multipart(
     Use this from browser file inputs / curl. For JSON callers, see
     `/predict-json` which accepts a base64-encoded image.
     """
-    artifact = db.get(ModelArtifact, model_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Model not found")
+    artifact = _require_artifact_access(db, current_user, model_id, Role.VIEWER)
     image_bytes = await file.read()
     return _predict_response(model_id, artifact, image_bytes, score_threshold)
 
@@ -223,9 +241,7 @@ def predict_json(
     current_user: User = Depends(get_current_user),
 ):
     """Run inference on the artifact via a JSON body with a base64 image."""
-    artifact = db.get(ModelArtifact, model_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Model not found")
+    artifact = _require_artifact_access(db, current_user, model_id, Role.VIEWER)
     try:
         image_bytes = base64.b64decode(body.image_base64)
     except Exception as exc:
@@ -261,9 +277,7 @@ def get_lineage(
     from app.models.cluster import Cluster
     from app.models.dataset import ClassMap
 
-    artifact = db.get(ModelArtifact, model_id)
-    if not artifact:
-        raise HTTPException(status_code=404, detail="Model not found")
+    artifact = _require_artifact_access(db, current_user, model_id, Role.VIEWER)
     run = db.get(ExperimentRun, artifact.run_id) if artifact.run_id else None
     version = (
         db.get(DatasetVersion, run.dataset_version_id) if run and run.dataset_version_id else None

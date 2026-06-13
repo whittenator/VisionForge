@@ -18,6 +18,11 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
 
   minio:
     image: minio/minio:latest
@@ -36,6 +41,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
 
   redis:
     image: redis:7
@@ -46,6 +56,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
 
   backend:
     build: ./backend
@@ -74,6 +89,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
 
   worker:
     build: ./backend
@@ -86,36 +106,66 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["celery", "-A", "app.jobs.celery_app:celery_app", "worker", "-l", "info"]
+    # -B embeds celery beat in the worker so periodic maintenance tasks
+    # (e.g. stale-heartbeat degrade) run without a separate beat container.
+    command: ["celery", "-A", "app.jobs.celery_app:celery_app", "worker", "-B", "-l", "info"]
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
 
+  # NOTE: This is the Vite DEV server — for local development only.
+  # For production, build the static bundle and serve it via nginx using
+  # frontend/Dockerfile.prod (build with `-f frontend/Dockerfile.prod`),
+  # which uses frontend/nginx.conf.
   frontend:
     build: ./frontend
     ports:
       - "5173:5173"
-    # NOTE: This runs the Vite dev server and is intended for local development.
-    # For production, build the static bundle and serve it via nginx using
-    # frontend/Dockerfile.prod (build with `-f frontend/Dockerfile.prod`).
     environment:
       VITE_API_URL: http://localhost:8000
     command: ["npm", "run", "dev", "--", "--host"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
 
   prometheus:
     image: prom/prometheus:latest
     volumes:
       - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus:/prometheus
     ports:
       - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
 
   grafana:
     image: grafana/grafana:latest
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      # Interpolated by Grafana provisioning ($POSTGRES_PASSWORD in
+      # deploy/grafana/provisioning/datasources/datasource.yml).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning
+      - grafana:/var/lib/grafana
     ports:
       - "3000:3000"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
 
 volumes:
   pgdata:
   minio:
+  prometheus:
+  grafana:

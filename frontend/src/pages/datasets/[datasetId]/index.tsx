@@ -347,7 +347,7 @@ function FrameExtractionCard({ datasetId, versionId }: { datasetId: string; vers
           a.uri.toLowerCase().endsWith('.webm');
         setVideos(items.filter(isVideo));
       })
-      .catch(() => {});
+      .catch((err) => console.warn('Failed to load video assets for frame extraction', err));
     return () => {
       cancelled = true;
     };

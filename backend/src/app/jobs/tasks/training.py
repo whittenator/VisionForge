@@ -309,7 +309,9 @@ def train_task(payload: dict) -> dict:
         result = {"status": "failed", "error": error_msg}
         try:
             if experiment_id:
-                run_obj = db.get(ExperimentRun, experiment_id) if "ExperimentRun" in dir() else None
+                from app.models.experiment import ExperimentRun as _ExperimentRun
+
+                run_obj = db.get(_ExperimentRun, experiment_id)
                 if run_obj:
                     run_obj.status = "failed"
                     run_obj.completed_at = datetime.now(timezone.utc)

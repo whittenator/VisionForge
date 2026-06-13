@@ -30,6 +30,7 @@ export default function DatasetNew() {
   const [classesText, setClassesText] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Created dataset
   const [datasetId, setDatasetId] = useState('');
@@ -42,7 +43,7 @@ export default function DatasetNew() {
   useEffect(() => {
     apiGet<{ items: Project[] }>('/api/projects?page=1&page_size=200')
       .then((d) => setProjects(d.items || []))
-      .catch(() => {});
+      .catch((err) => setLoadError(err instanceof Error ? err.message : 'Failed to load projects'));
   }, []);
 
   async function createDataset() {
@@ -134,6 +135,7 @@ export default function DatasetNew() {
       {/* Step 1 — Define */}
       {step === 0 && (
         <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-4 space-y-3">
+          {loadError && <Alert variant="error">Failed to load projects: {loadError}</Alert>}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label-overline block mb-1" htmlFor="proj">

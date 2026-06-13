@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.db.deps import get_current_user, get_db
 from app.models.user import User
 from app.models.workspace import Membership, Role, Workspace
+from app.services.authz import require_workspace_access
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -81,6 +82,7 @@ def get_workspace(
     ws = db.get(Workspace, workspace_id)
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    require_workspace_access(db, current_user, workspace_id)
     return {
         "id": ws.id,
         "name": ws.name,
@@ -95,6 +97,7 @@ def list_members(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    require_workspace_access(db, current_user, workspace_id)
     members = list(
         db.scalars(select(Membership).where(Membership.workspace_id == workspace_id)).all()
     )
@@ -122,6 +125,7 @@ def invite_member(
     ws = db.get(Workspace, workspace_id)
     if not ws:
         raise HTTPException(status_code=404, detail="Workspace not found")
+    require_workspace_access(db, current_user, workspace_id, Role.ADMIN)
     # Look up user by email
     invited_user = db.scalars(select(User).where(User.email == body.email)).first()
     if not invited_user:

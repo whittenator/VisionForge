@@ -47,7 +47,7 @@ export default function ArchiveImporter({
   useEffect(() => {
     apiGet<{ formats: string[] }>('/api/datasets/formats')
       .then((r) => r.formats?.length && setFormats(r.formats))
-      .catch(() => {});
+      .catch((err) => console.warn('Failed to load import formats, using defaults', err));
   }, []);
 
   async function onSubmit(e: React.FormEvent) {

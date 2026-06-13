@@ -1,47 +1,48 @@
-import React, { useState, useEffect } from "react";
-import { BrowserRouter, Routes, Route, Link } from "react-router-dom";
-import { AuthProvider } from "@/services/auth-store";
-import ProtectedRoute from "@/components/layout/ProtectedRoute";
-import LoginPage from "@/pages/auth/Login";
-import AppShell from "@/components/layout/AppShell";
-import AnnotatorPage from "./pages/annotate/Annotator";
-import AdminUsersPage from "./pages/admin/users";
-import ProjectsIndex from "./pages/projects/index";
-import ProjectsCreate from "./pages/projects/create";
-import ProjectDashboard from "./pages/projects/[projectId]/index";
-import DatasetUpload from "./pages/datasets/upload";
-import DatasetVersion from "./pages/datasets/version";
-import DatasetsIndex from "./pages/datasets/index";
-import DatasetNew from "./pages/datasets/new";
-import DatasetDetail from "./pages/datasets/[datasetId]/index";
-import DatasetMetrics from "./pages/datasets/[datasetId]/metrics";
-import DatasetAnnotateGateway from "./pages/datasets/[datasetId]/annotate";
-import DatasetReviewQueue from "./pages/datasets/[datasetId]/review";
-import ExperimentsIndex from "./pages/experiments/index";
-import ExperimentsNew from "./pages/experiments/new";
-import ExperimentDetail from "./pages/experiments/[runId]";
-import ArtifactsIndex from "./pages/artifacts/index";
-import ArtifactsExport from "./pages/artifacts/export";
-import ArtifactsLineage from "./pages/artifacts/lineage";
-import ActiveLearningIndex from "./pages/active-learning/index";
-import ActiveLearningNew from "./pages/active-learning/new";
-import ALRunDetail from "./pages/active-learning/[alRunId]";
-import ClustersIndex from "./pages/clusters/index";
-import ClustersNew from "./pages/clusters/new";
-import EvaluationsIndex from "./pages/evaluations/index";
-import EvaluationsNew from "./pages/evaluations/new";
-import EvaluationDetail from "./pages/evaluations/[evalId]";
-import ArtifactsPredict from "./pages/artifacts/predict";
-import DatasetImport from "./pages/datasets/import";
-import { apiGet } from "@/services/api";
-import Spinner from "@/components/ui/Spinner";
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { AuthProvider } from '@/services/auth-store';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
+import ProtectedRoute from '@/components/layout/ProtectedRoute';
+import LoginPage from '@/pages/auth/Login';
+import AppShell from '@/components/layout/AppShell';
+import AnnotatorPage from './pages/annotate/Annotator';
+import AdminUsersPage from './pages/admin/users';
+import ProjectsIndex from './pages/projects/index';
+import ProjectsCreate from './pages/projects/create';
+import ProjectDashboard from './pages/projects/[projectId]/index';
+import DatasetUpload from './pages/datasets/upload';
+import DatasetVersion from './pages/datasets/version';
+import DatasetsIndex from './pages/datasets/index';
+import DatasetNew from './pages/datasets/new';
+import DatasetDetail from './pages/datasets/[datasetId]/index';
+import DatasetMetrics from './pages/datasets/[datasetId]/metrics';
+import DatasetAnnotateGateway from './pages/datasets/[datasetId]/annotate';
+import DatasetReviewQueue from './pages/datasets/[datasetId]/review';
+import ExperimentsIndex from './pages/experiments/index';
+import ExperimentsNew from './pages/experiments/new';
+import ExperimentDetail from './pages/experiments/[runId]';
+import ArtifactsIndex from './pages/artifacts/index';
+import ArtifactsExport from './pages/artifacts/export';
+import ArtifactsLineage from './pages/artifacts/lineage';
+import ActiveLearningIndex from './pages/active-learning/index';
+import ActiveLearningNew from './pages/active-learning/new';
+import ALRunDetail from './pages/active-learning/[alRunId]';
+import ClustersIndex from './pages/clusters/index';
+import ClustersNew from './pages/clusters/new';
+import EvaluationsIndex from './pages/evaluations/index';
+import EvaluationsNew from './pages/evaluations/new';
+import EvaluationDetail from './pages/evaluations/[evalId]';
+import ArtifactsPredict from './pages/artifacts/predict';
+import DatasetImport from './pages/datasets/import';
+import { apiGet } from '@/services/api';
+import Spinner from '@/components/ui/Spinner';
 
 function StatReadout({ label, value, loading, href }) {
   return (
     <div className="border border-[var(--hud-border-default)] bg-[var(--hud-surface)] p-3 flex flex-col gap-1">
       <div className="label-overline">{label}</div>
       <div className="text-2xl font-semibold font-mono text-[var(--hud-text-data)]">
-        {loading ? <Spinner size={18} /> : value ?? 0}
+        {loading ? <Spinner size={18} /> : (value ?? 0)}
       </div>
       {href && (
         <Link
@@ -56,20 +57,17 @@ function StatReadout({ label, value, loading, href }) {
 }
 
 function StatusRow({ label, component }) {
-  const status = component?.status || "unknown";
+  const status = component?.status || 'unknown';
   const cls =
-    status === "ok"
-      ? "text-[var(--hud-success-text)]"
-      : status === "degraded"
-      ? "text-[var(--hud-warning-text,oklch(0.78_0.18_85))]"
-      : "text-[var(--hud-danger-text)]";
-  const dot = status === "ok" ? "●" : status === "degraded" ? "◐" : "○";
-  const labelOut = status === "ok" ? "ONLINE" : status.toUpperCase();
+    status === 'ok'
+      ? 'text-[var(--hud-success-text)]'
+      : status === 'degraded'
+        ? 'text-[var(--hud-warning-text,oklch(0.78_0.18_85))]'
+        : 'text-[var(--hud-danger-text)]';
+  const dot = status === 'ok' ? '●' : status === 'degraded' ? '◐' : '○';
+  const labelOut = status === 'ok' ? 'ONLINE' : status.toUpperCase();
   return (
-    <div
-      className="flex items-center justify-between gap-4"
-      title={component?.detail || status}
-    >
+    <div className="flex items-center justify-between gap-4" title={component?.detail || status}>
       <span className="text-[var(--hud-text-muted)]">{label}</span>
       <span className={cls}>
         {dot} {labelOut}
@@ -84,10 +82,10 @@ function SystemStatusPanel({ system }) {
     <div className="border border-[var(--hud-border-default)] bg-[var(--hud-inset)] px-4 py-3 min-w-[160px]">
       <div className="label-overline mb-2">System Status</div>
       <div className="space-y-1.5 text-xs font-mono">
-        <StatusRow label="API"      component={components.api}      />
+        <StatusRow label="API" component={components.api} />
         <StatusRow label="DATABASE" component={components.database} />
-        <StatusRow label="QUEUE"    component={components.queue}    />
-        <StatusRow label="STORAGE"  component={components.storage}  />
+        <StatusRow label="QUEUE" component={components.queue} />
+        <StatusRow label="STORAGE" component={components.storage} />
       </div>
     </div>
   );
@@ -101,18 +99,14 @@ function HomeDashboard() {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      apiGet("/api/projects?page=1&page_size=1"),
-      apiGet("/api/datasets?page=1&page_size=1"),
-      apiGet("/api/artifacts/models?page=1&page_size=1"),
+      apiGet('/api/projects?page=1&page_size=1'),
+      apiGet('/api/datasets?page=1&page_size=1'),
+      apiGet('/api/artifacts/models?page=1&page_size=1'),
     ])
       .then(([projects, datasets, models]) => {
         if (cancelled) return;
         const total = (resp) =>
-          typeof resp?.total === "number"
-            ? resp.total
-            : Array.isArray(resp)
-            ? resp.length
-            : 0;
+          typeof resp?.total === 'number' ? resp.total : Array.isArray(resp) ? resp.length : 0;
         setStats({
           projects: total(projects),
           datasets: total(datasets),
@@ -130,9 +124,9 @@ function HomeDashboard() {
     let cancelled = false;
     let timer;
     const tick = () => {
-      apiGet("/api/system/status")
+      apiGet('/api/system/status')
         .then((data) => !cancelled && setSystem(data))
-        .catch(() => !cancelled && setSystem({ status: "down", components: {} }));
+        .catch(() => !cancelled && setSystem({ status: 'down', components: {} }));
     };
     tick();
     timer = setInterval(tick, 15000);
@@ -149,7 +143,9 @@ function HomeDashboard() {
         <div className="grid gap-6 md:grid-cols-[1fr_auto] items-center">
           <div className="space-y-3">
             <h1 className="text-xl font-semibold tracking-tight text-[var(--hud-text-primary)]">
-              Manage datasets, annotate frames,<br />and iterate on models.
+              Manage datasets, annotate frames,
+              <br />
+              and iterate on models.
             </h1>
             <p className="text-xs text-[var(--hud-text-muted)] max-w-md">
               End-to-end CV workflow: ingest → annotate → train → export → deploy.
@@ -176,9 +172,24 @@ function HomeDashboard() {
       <div>
         <div className="label-overline mb-2">Platform Overview</div>
         <div className="grid grid-cols-3 gap-px bg-[var(--hud-border-default)]">
-          <StatReadout label="Projects" value={stats.projects} loading={statsLoading} href="/projects"  />
-          <StatReadout label="Datasets" value={stats.datasets} loading={statsLoading} href="/datasets"  />
-          <StatReadout label="Models"   value={stats.models}   loading={statsLoading} href="/artifacts" />
+          <StatReadout
+            label="Projects"
+            value={stats.projects}
+            loading={statsLoading}
+            href="/projects"
+          />
+          <StatReadout
+            label="Datasets"
+            value={stats.datasets}
+            loading={statsLoading}
+            href="/datasets"
+          />
+          <StatReadout
+            label="Models"
+            value={stats.models}
+            loading={statsLoading}
+            href="/artifacts"
+          />
         </div>
       </div>
 
@@ -186,11 +197,15 @@ function HomeDashboard() {
         <div className="label-overline mb-2">Quick Access</div>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-[var(--hud-border-default)]">
           {[
-            { to: "/projects",        label: "PROJECTS",     desc: "Manage project workspaces"           },
-            { to: "/datasets",        label: "DATASETS",     desc: "Browse and upload datasets"          },
-            { to: "/experiments",     label: "EXPERIMENTS",  desc: "Training runs and metrics"           },
-            { to: "/artifacts",       label: "ARTIFACTS",    desc: "Model exports and lineage"           },
-            { to: "/active-learning", label: "ACTIVE LEARN", desc: "Select informative samples to label" },
+            { to: '/projects', label: 'PROJECTS', desc: 'Manage project workspaces' },
+            { to: '/datasets', label: 'DATASETS', desc: 'Browse and upload datasets' },
+            { to: '/experiments', label: 'EXPERIMENTS', desc: 'Training runs and metrics' },
+            { to: '/artifacts', label: 'ARTIFACTS', desc: 'Model exports and lineage' },
+            {
+              to: '/active-learning',
+              label: 'ACTIVE LEARN',
+              desc: 'Select informative samples to label',
+            },
           ].map(({ to, label, desc }) => (
             <Link
               key={to}
@@ -211,61 +226,266 @@ function HomeDashboard() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AppShell>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <HomeDashboard />
-                </ProtectedRoute>
-              }
-            />
-            {/* Projects */}
-            <Route path="/projects" element={<ProtectedRoute><ProjectsIndex /></ProtectedRoute>} />
-            <Route path="/projects/create" element={<ProtectedRoute><ProjectsCreate /></ProtectedRoute>} />
-            <Route path="/projects/:projectId" element={<ProtectedRoute><ProjectDashboard /></ProtectedRoute>} />
-            {/* Datasets */}
-            <Route path="/datasets" element={<ProtectedRoute><DatasetsIndex /></ProtectedRoute>} />
-            <Route path="/datasets/new" element={<ProtectedRoute><DatasetNew /></ProtectedRoute>} />
-            <Route path="/datasets/upload" element={<ProtectedRoute><DatasetUpload /></ProtectedRoute>} />
-            <Route path="/datasets/version" element={<ProtectedRoute><DatasetVersion /></ProtectedRoute>} />
-            <Route path="/datasets/:datasetId" element={<ProtectedRoute><DatasetDetail /></ProtectedRoute>} />
-            <Route path="/datasets/:datasetId/metrics" element={<ProtectedRoute><DatasetMetrics /></ProtectedRoute>} />
-            <Route path="/datasets/:datasetId/annotate" element={<ProtectedRoute><DatasetAnnotateGateway /></ProtectedRoute>} />
-            <Route path="/datasets/:datasetId/review" element={<ProtectedRoute><DatasetReviewQueue /></ProtectedRoute>} />
-            {/* Experiments */}
-            <Route path="/experiments" element={<ProtectedRoute><ExperimentsIndex /></ProtectedRoute>} />
-            <Route path="/experiments/new" element={<ProtectedRoute><ExperimentsNew /></ProtectedRoute>} />
-            <Route path="/experiments/runs/:runId" element={<ProtectedRoute><ExperimentDetail /></ProtectedRoute>} />
-            {/* Artifacts */}
-            <Route path="/artifacts" element={<ProtectedRoute><ArtifactsIndex /></ProtectedRoute>} />
-            <Route path="/artifacts/export/:modelId" element={<ProtectedRoute><ArtifactsExport /></ProtectedRoute>} />
-            <Route path="/artifacts/lineage/:modelId" element={<ProtectedRoute><ArtifactsLineage /></ProtectedRoute>} />
-            {/* Active Learning */}
-            <Route path="/active-learning" element={<ProtectedRoute><ActiveLearningIndex /></ProtectedRoute>} />
-            <Route path="/active-learning/new" element={<ProtectedRoute><ActiveLearningNew /></ProtectedRoute>} />
-            <Route path="/active-learning/:alRunId" element={<ProtectedRoute><ALRunDetail /></ProtectedRoute>} />
-            {/* Clusters */}
-            <Route path="/clusters" element={<ProtectedRoute><ClustersIndex /></ProtectedRoute>} />
-            <Route path="/clusters/new" element={<ProtectedRoute><ClustersNew /></ProtectedRoute>} />
-            {/* Evaluations */}
-            <Route path="/evaluations" element={<ProtectedRoute><EvaluationsIndex /></ProtectedRoute>} />
-            <Route path="/evaluations/new" element={<ProtectedRoute><EvaluationsNew /></ProtectedRoute>} />
-            <Route path="/evaluations/:evalId" element={<ProtectedRoute><EvaluationDetail /></ProtectedRoute>} />
-            {/* Predict + import */}
-            <Route path="/artifacts/predict/:modelId" element={<ProtectedRoute><ArtifactsPredict /></ProtectedRoute>} />
-            <Route path="/datasets/import" element={<ProtectedRoute><DatasetImport /></ProtectedRoute>} />
-            {/* Annotate */}
-            <Route path="/annotate/:assetId" element={<ProtectedRoute><AnnotatorPage /></ProtectedRoute>} />
-            {/* Admin */}
-            <Route path="/admin/users" element={<ProtectedRoute><AdminUsersPage /></ProtectedRoute>} />
-          </Routes>
-        </AppShell>
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppShell>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <HomeDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Projects */}
+              <Route
+                path="/projects"
+                element={
+                  <ProtectedRoute>
+                    <ProjectsIndex />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/projects/create"
+                element={
+                  <ProtectedRoute>
+                    <ProjectsCreate />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/projects/:projectId"
+                element={
+                  <ProtectedRoute>
+                    <ProjectDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Datasets */}
+              <Route
+                path="/datasets"
+                element={
+                  <ProtectedRoute>
+                    <DatasetsIndex />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/new"
+                element={
+                  <ProtectedRoute>
+                    <DatasetNew />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/upload"
+                element={
+                  <ProtectedRoute>
+                    <DatasetUpload />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/version"
+                element={
+                  <ProtectedRoute>
+                    <DatasetVersion />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/:datasetId"
+                element={
+                  <ProtectedRoute>
+                    <DatasetDetail />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/:datasetId/metrics"
+                element={
+                  <ProtectedRoute>
+                    <DatasetMetrics />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/:datasetId/annotate"
+                element={
+                  <ProtectedRoute>
+                    <DatasetAnnotateGateway />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/:datasetId/review"
+                element={
+                  <ProtectedRoute>
+                    <DatasetReviewQueue />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Experiments */}
+              <Route
+                path="/experiments"
+                element={
+                  <ProtectedRoute>
+                    <ExperimentsIndex />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/experiments/new"
+                element={
+                  <ProtectedRoute>
+                    <ExperimentsNew />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/experiments/runs/:runId"
+                element={
+                  <ProtectedRoute>
+                    <ExperimentDetail />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Artifacts */}
+              <Route
+                path="/artifacts"
+                element={
+                  <ProtectedRoute>
+                    <ArtifactsIndex />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/artifacts/export/:modelId"
+                element={
+                  <ProtectedRoute>
+                    <ArtifactsExport />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/artifacts/lineage/:modelId"
+                element={
+                  <ProtectedRoute>
+                    <ArtifactsLineage />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Active Learning */}
+              <Route
+                path="/active-learning"
+                element={
+                  <ProtectedRoute>
+                    <ActiveLearningIndex />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/active-learning/new"
+                element={
+                  <ProtectedRoute>
+                    <ActiveLearningNew />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/active-learning/:alRunId"
+                element={
+                  <ProtectedRoute>
+                    <ALRunDetail />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Clusters */}
+              <Route
+                path="/clusters"
+                element={
+                  <ProtectedRoute>
+                    <ClustersIndex />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/clusters/new"
+                element={
+                  <ProtectedRoute>
+                    <ClustersNew />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Evaluations */}
+              <Route
+                path="/evaluations"
+                element={
+                  <ProtectedRoute>
+                    <EvaluationsIndex />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/evaluations/new"
+                element={
+                  <ProtectedRoute>
+                    <EvaluationsNew />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/evaluations/:evalId"
+                element={
+                  <ProtectedRoute>
+                    <EvaluationDetail />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Predict + import */}
+              <Route
+                path="/artifacts/predict/:modelId"
+                element={
+                  <ProtectedRoute>
+                    <ArtifactsPredict />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/import"
+                element={
+                  <ProtectedRoute>
+                    <DatasetImport />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Annotate */}
+              <Route
+                path="/annotate/:assetId"
+                element={
+                  <ProtectedRoute>
+                    <AnnotatorPage />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Admin */}
+              <Route
+                path="/admin/users"
+                element={
+                  <ProtectedRoute>
+                    <AdminUsersPage />
+                  </ProtectedRoute>
+                }
+              />
+            </Routes>
+          </AppShell>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

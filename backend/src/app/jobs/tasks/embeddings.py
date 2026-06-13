@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from pathlib import Path
@@ -98,15 +97,9 @@ def generate_embeddings(payload: dict) -> dict:
 
                         image_vectors.append(vec)
 
-                        # Persist embedding into Asset.meta_data
-                        meta: dict = {}
-                        if asset.meta_data:
-                            try:
-                                meta = json.loads(asset.meta_data)
-                            except Exception:
-                                meta = {}
-                        meta["embedding"] = vec
-                        asset.meta_data = json.dumps(meta)
+                        # Persist to the dedicated vector column (pgvector on
+                        # Postgres) so similarity queries can use the ANN index.
+                        asset.embedding = vec
                         db.add(asset)
 
                         # Commit in batches to avoid long transactions

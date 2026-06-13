@@ -14,7 +14,7 @@ from app.db.deps import get_current_user
 from app.main import app
 from app.models.experiment import ExperimentRun
 from app.models.user import User
-from tests.conftest import TestingSessionLocal, client
+from tests.conftest import TestingSessionLocal, client, ensure_project
 
 
 def _fake_user() -> User:
@@ -25,6 +25,7 @@ app.dependency_overrides[get_current_user] = _fake_user
 
 
 def _mk_run(project_id: str, *, metrics_json: str | None = None) -> str:
+    ensure_project(project_id)
     db = TestingSessionLocal()
     try:
         run = ExperimentRun(
@@ -44,6 +45,7 @@ def _mk_run(project_id: str, *, metrics_json: str | None = None) -> str:
 
 def test_create_run():
     project_id = uuid.uuid4().hex
+    ensure_project(project_id)
     r = client.post(
         "/api/experiments/runs",
         json={"project_id": project_id, "name": "My Run", "params": {"lr": 0.01}},

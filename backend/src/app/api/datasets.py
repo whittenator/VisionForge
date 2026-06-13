@@ -21,8 +21,10 @@ from app.db.deps import get_current_user, get_db
 from app.models.asset import Asset
 from app.models.dataset import ClassMap, Dataset
 from app.models.dataset_version import DatasetVersion
+from app.models.project import Project
 from app.models.user import User
-from app.services import datumaro_service
+from app.models.workspace import Membership, Role
+from app.services import authz, datumaro_service
 from app.services.dataset_service import snapshot_version
 from app.services.project_dataset_service import create_dataset as svc_create_dataset
 
@@ -30,6 +32,16 @@ router = APIRouter(prefix="/api", tags=["datasets"])
 
 # label_status values that count as "annotated" toward coverage.
 _LABELED_STATUSES = ("labeled", "prelabeled")
+
+
+def _member_workspace_ids(db: Session, user: User) -> list[str]:
+    """Workspace ids the user belongs to, plus the shared default workspace."""
+    ws_ids = {
+        m.workspace_id
+        for m in db.scalars(select(Membership).where(Membership.user_id == user.id)).all()
+    }
+    ws_ids.add(authz.DEFAULT_WORKSPACE_ID)
+    return list(ws_ids)
 
 
 def _coverage_for_version(db: Session, version_id: str | None) -> tuple[float, str]:
@@ -94,7 +106,12 @@ def list_datasets(
 ):
     base = select(Dataset)
     if project_id:
+        authz.require_project_access(db, current_user, project_id, Role.VIEWER)
         base = base.where(Dataset.project_id == project_id)
+    elif not authz.is_superuser(db, current_user):
+        base = base.join(Project, Dataset.project_id == Project.id).where(
+            Project.workspace_id.in_(_member_workspace_ids(db, current_user))
+        )
 
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     offset = (page - 1) * page_size
@@ -145,9 +162,7 @@ def get_dataset(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    d = db.get(Dataset, dataset_id)
-    if not d:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    d = authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
     versions = list(
         db.scalars(
             select(DatasetVersion)
@@ -197,6 +212,7 @@ def create_dataset(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_project_access(db, current_user, project_id, Role.DEVELOPER)
     try:
         d, v = svc_create_dataset(
             db,
@@ -238,9 +254,7 @@ def update_dataset_task_type(
             status_code=400,
             detail=f"task_type must be one of {list(VALID_TASK_TYPES)}",
         )
-    d = db.get(Dataset, dataset_id)
-    if not d:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    d = authz.require_dataset_access(db, current_user, dataset_id, Role.DEVELOPER)
     d.task_type = body.task_type
     db.add(d)
     db.commit()
@@ -253,6 +267,7 @@ def list_versions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
     versions = list(
         db.scalars(
             select(DatasetVersion)
@@ -280,9 +295,7 @@ def create_snapshot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    d = db.get(Dataset, dataset_id)
-    if not d:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    authz.require_dataset_access(db, current_user, dataset_id, Role.DEVELOPER)
     v = snapshot_version(db, dataset_id, notes=body.notes)
     return {
         "id": v.id,
@@ -307,9 +320,7 @@ async def import_dataset(
     If `version_id` is omitted, a fresh draft version is created. The archive
     must contain images plus annotation files for the chosen format.
     """
-    d = db.get(Dataset, dataset_id)
-    if not d:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    authz.require_dataset_access(db, current_user, dataset_id, Role.DEVELOPER)
 
     # Resolve target version
     if version_id:
@@ -367,6 +378,7 @@ def export_dataset(
     current_user: User = Depends(get_current_user),
 ):
     """Export a dataset version as a zip archive in the requested format."""
+    authz.require_dataset_access(db, current_user, dataset_id, Role.DEVELOPER)
     try:
         archive = datumaro_service.export_archive(
             db, dataset_id=dataset_id, version_id=version_id, fmt=fmt
@@ -386,9 +398,7 @@ def update_classes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    d = db.get(Dataset, dataset_id)
-    if not d:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    d = authz.require_dataset_access(db, current_user, dataset_id, Role.DEVELOPER)
     if d.class_map_id:
         cm = db.get(ClassMap, d.class_map_id)
         if cm:

@@ -679,17 +679,32 @@ export default function AnnotatorPage() {
   // -------------------------------------------------------------------------
 
   function deleteAnnotation(idx: number) {
+    const ann = annotationsRef.current[idx];
+    if (!ann) return;
     pushHistory();
     setAnnotations((prev) => {
-      const ann = prev[idx];
-      if (!ann) return prev;
-      if (ann.id) apiDelete(`/api/annotations/${ann.id}`).catch(() => {});
       const updated = prev.filter((_, i) => i !== idx);
       annotationsRef.current = updated;
       return updated;
     });
     setSelectedAnnotationIdx(null);
     setDirty(true);
+    if (ann.id) {
+      apiDelete(`/api/annotations/${ann.id}`).catch((err) => {
+        console.warn('Failed to delete annotation on server, restoring it locally', err);
+        // Server delete failed — put the annotation back so local state stays in
+        // sync with the server, and surface a brief error in the status bar.
+        setAnnotations((prev) => {
+          const restored = [...prev];
+          restored.splice(Math.min(idx, restored.length), 0, ann);
+          annotationsRef.current = restored;
+          return restored;
+        });
+        setStatus(
+          `Delete failed: ${err instanceof Error ? err.message : 'error'} — annotation restored`,
+        );
+      });
+    }
   }
 
   function setAnnotationClass(idx: number, className: string) {

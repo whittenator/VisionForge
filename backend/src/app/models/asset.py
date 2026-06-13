@@ -6,6 +6,10 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import EmbeddingVector
+
+# ViT-B-32 (open-clip) output dimension; must match EmbeddingsService.
+EMBEDDING_DIM = 512
 
 
 def _uuid() -> str:
@@ -25,5 +29,8 @@ class Asset(Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     meta_data: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    label_status: Mapped[str] = mapped_column(String(50), nullable=False, default="unlabelled")
+    embedding: Mapped[list[float] | None] = mapped_column(
+        EmbeddingVector(EMBEDDING_DIM), nullable=True
+    )
+    label_status: Mapped[str] = mapped_column(String(50), nullable=False, default="unlabeled")
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())

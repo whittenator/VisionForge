@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.db.deps import get_current_user, get_db
@@ -21,6 +22,10 @@ from app.schemas.cluster import (
 from app.services import cluster_service
 
 router = APIRouter(prefix="/api/clusters", tags=["clusters"])
+
+# Bearer scheme for unattended agent heartbeats (carries the register_token,
+# not a user JWT); optional so the body-token fallback still works.
+_heartbeat_bearer = HTTPBearer(auto_error=False)
 
 
 def _platform_api_url(request: Request) -> str:
@@ -125,14 +130,17 @@ def heartbeat(
     payload: ClusterHeartbeat,
     cluster_id: str = Path(...),
     db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_heartbeat_bearer),
 ):
     """Endpoint called by the cluster agent every N seconds with telemetry.
 
-    Authenticates via the cluster's `register_token` (returned on creation).
-    Does not require a logged-in user, since the agent runs unattended.
+    Authenticates via the cluster's `register_token` (returned on creation),
+    supplied as an `Authorization: Bearer` header or in the body. Does not
+    require a logged-in user, since the agent runs unattended.
     """
+    auth_token = credentials.credentials if credentials else None
     try:
-        cluster = cluster_service.record_heartbeat(db, cluster_id, payload)
+        cluster = cluster_service.record_heartbeat(db, cluster_id, payload, auth_token=auth_token)
     except cluster_service.ClusterError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not cluster:

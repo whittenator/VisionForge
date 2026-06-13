@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import random
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -14,8 +15,11 @@ from app.models.alitem import ALItem
 from app.models.alrun import ALRun
 from app.models.artifact import ModelArtifact
 from app.models.asset import Asset
+from app.models.dataset_version import DatasetVersion
+from app.models.project import Project
 from app.models.user import User
-from app.services import inference_service
+from app.models.workspace import Membership, Role
+from app.services import authz, inference_service
 from app.services.active_learning_service import select_diverse, select_uncertain
 from app.services.asset_fetch import fetch_asset_bytes
 from app.services.embeddings_service import EmbeddingsService
@@ -26,6 +30,15 @@ router = APIRouter(prefix="/api/al", tags=["active-learning"])
 # pools fall back to random for the excess + can be scored fully via the
 # `app.jobs.tasks.al_uncertainty.score_assets` Celery task. Tunable via env.
 _INLINE_SCORE_CAP = int(os.getenv("VF_AL_INLINE_SCORE_CAP", "200"))
+
+
+def _member_workspace_ids(db: Session, user: User) -> list[str]:
+    ws_ids = {
+        m.workspace_id
+        for m in db.scalars(select(Membership).where(Membership.user_id == user.id)).all()
+    }
+    ws_ids.add(authz.DEFAULT_WORKSPACE_ID)
+    return list(ws_ids)
 
 
 def _uncertainty_scores(db: Session, assets: list, model_id: str | None) -> list[float]:
@@ -149,13 +162,16 @@ def queue_uncertainty_scoring(
     can read cached scores instead of running inference inline.
     """
     from app.jobs.celery_app import celery_app
-    from app.models.dataset_version import DatasetVersion
     from app.services.jobs_service import create_job, update_job_status
 
-    if not db.get(ModelArtifact, body.artifact_id):
+    artifact = db.get(ModelArtifact, body.artifact_id)
+    if not artifact:
         raise HTTPException(status_code=400, detail="artifact not found")
-    if not db.get(DatasetVersion, body.dataset_version_id):
+    version = db.get(DatasetVersion, body.dataset_version_id)
+    if not version:
         raise HTTPException(status_code=400, detail="dataset version not found")
+    authz.require_project_access(db, current_user, artifact.project_id, Role.DEVELOPER)
+    authz.require_dataset_access(db, current_user, version.dataset_id, Role.DEVELOPER)
 
     payload = {
         "artifactId": body.artifact_id,
@@ -182,6 +198,10 @@ def select_samples(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    authz.require_project_access(db, current_user, body.project_id, Role.DEVELOPER)
+    version = db.get(DatasetVersion, body.dataset_version_id)
+    if version is not None:
+        authz.require_dataset_access(db, current_user, version.dataset_id, Role.DEVELOPER)
     # Get unlabeled assets for this version
     assets = list(
         db.scalars(
@@ -257,7 +277,12 @@ def list_runs(
 ):
     base = select(ALRun)
     if project_id:
+        authz.require_project_access(db, current_user, project_id, Role.VIEWER)
         base = base.where(ALRun.project_id == project_id)
+    elif not authz.is_superuser(db, current_user):
+        base = base.join(Project, ALRun.project_id == Project.id).where(
+            Project.workspace_id.in_(_member_workspace_ids(db, current_user))
+        )
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     offset = (page - 1) * page_size
     runs = list(
@@ -285,6 +310,9 @@ def get_al_items(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    run = db.get(ALRun, al_run_id)
+    if run is not None:
+        authz.require_project_access(db, current_user, run.project_id, Role.VIEWER)
     items = list(db.scalars(select(ALItem).where(ALItem.al_run_id == al_run_id)).all())
     return [
         {
@@ -307,8 +335,12 @@ def resolve_item(
     item = db.get(ALItem, item_id)
     if not item or item.al_run_id != al_run_id:
         raise HTTPException(status_code=404, detail="AL item not found")
+    run = db.get(ALRun, item.al_run_id)
+    if run is not None:
+        authz.require_project_access(db, current_user, run.project_id, Role.ANNOTATOR)
     item.resolved_status = "resolved"
     item.resolved_by = current_user.id
+    item.resolved_at = datetime.now(timezone.utc)
     db.add(item)
     db.commit()
     db.refresh(item)

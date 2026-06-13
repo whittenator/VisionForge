@@ -15,8 +15,12 @@ datasources:
     database: visionforge
     user: visionforge
     secureJsonData:
+      # Interpolated by Grafana provisioning from the container environment;
+      # POSTGRES_PASSWORD is passed through in docker-compose.yml.
       password: "${POSTGRES_PASSWORD}"
     jsonData:
+      # `disable` is acceptable only for the dev compose stack (dev postgres
+      # has no TLS). In production this MUST be `require` or `verify-full`.
       sslmode: disable
       maxOpenConns: 5
       maxIdleConns: 2

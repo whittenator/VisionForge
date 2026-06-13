@@ -20,6 +20,8 @@ HEARTBEAT_TIMEOUT_S = float(os.getenv("VF_AGENT_HEARTBEAT_TIMEOUT", "10"))
 def _payload(ident: identity.Identity) -> dict[str, Any]:
     snap = discover.discover()
     return {
+        # Token also goes in the Authorization header (preferred); kept in the
+        # body for compatibility with platforms that predate header auth.
         "register_token": ident.register_token,
         "status": "online",
         "cpu_usage_pct": snap["cpu_usage_pct"],
@@ -43,7 +45,8 @@ def send_once(ident: identity.Identity, *, client: httpx.Client | None = None) -
     own = client is None
     c = client or httpx.Client(timeout=HEARTBEAT_TIMEOUT_S)
     try:
-        resp = c.post(url, json=_payload(ident))
+        headers = {"Authorization": f"Bearer {ident.register_token}"}
+        resp = c.post(url, json=_payload(ident), headers=headers)
         return resp.status_code
     except httpx.HTTPError as exc:
         logger.warning("heartbeat transport error: %s", exc)

@@ -94,10 +94,12 @@ class ClusterUpdate(BaseModel):
 class ClusterHeartbeat(BaseModel):
     """Telemetry payload sent periodically by the agent on a cluster.
 
-    The agent authenticates by including the cluster's `register_token`.
+    The agent authenticates by including the cluster's `register_token`,
+    either in this body field or as an ``Authorization: Bearer`` header
+    (preferred — keeps the secret out of request-body logs).
     """
 
-    register_token: str
+    register_token: str | None = None
     status: ClusterStatus = "online"
     cpu_usage_pct: float = 0.0
     ram_used_mb: int = 0

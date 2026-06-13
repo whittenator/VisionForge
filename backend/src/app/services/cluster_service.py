@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
@@ -254,11 +255,19 @@ def get_cluster(db: Session, cluster_id: str) -> Cluster | None:
     return db.get(Cluster, cluster_id)
 
 
-def record_heartbeat(db: Session, cluster_id: str, payload: ClusterHeartbeat) -> Cluster | None:
+def record_heartbeat(
+    db: Session,
+    cluster_id: str,
+    payload: ClusterHeartbeat,
+    *,
+    auth_token: str | None = None,
+) -> Cluster | None:
     cluster = db.get(Cluster, cluster_id)
     if not cluster:
         return None
-    if payload.register_token != cluster.register_token:
+    # Prefer the Authorization header token; fall back to the body field.
+    presented = auth_token or payload.register_token or ""
+    if not presented or not hmac.compare_digest(presented, cluster.register_token or ""):
         raise ClusterError("invalid register_token")
 
     cluster.cpu_usage_pct = float(payload.cpu_usage_pct)

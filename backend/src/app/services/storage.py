@@ -41,9 +41,13 @@ def get_bytes(client: Minio, object_key: str, bucket: str | None = None) -> byte
 
 
 def get_minio_client() -> Minio:
+    from app.settings import require_secure_setting
+
     endpoint = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-    secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+    secret_key = require_secure_setting(
+        "MINIO_SECRET_KEY", os.getenv("MINIO_SECRET_KEY", "minioadmin"), ("minioadmin",)
+    )
     secure = os.getenv("MINIO_SECURE", "false").lower() == "true"
     return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
 
