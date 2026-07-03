@@ -19,8 +19,12 @@ from app.models.dataset_version import DatasetVersion
 from app.models.project import Project
 from app.models.user import User
 from app.models.workspace import Membership, Role
-from app.services import authz, inference_service
-from app.services.active_learning_service import select_diverse, select_uncertain
+from app.services import authz, inference_service, training_service
+from app.services.active_learning_service import (
+    resolution_stats,
+    select_diverse,
+    select_uncertain,
+)
 from app.services.asset_fetch import fetch_asset_bytes
 from app.services.embeddings_service import EmbeddingsService
 
@@ -349,4 +353,128 @@ def resolve_item(
         "asset_id": item.asset_id,
         "priority": item.priority,
         "resolved_status": item.resolved_status,
+    }
+
+
+class ALRetrainRequest(BaseModel):
+    dataset_version_id: str | None = None
+    task: str | None = None
+    framework: str | None = None
+    cluster_id: str | None = None
+    base_model: str | None = None
+    params: dict | None = None
+
+    model_config = {
+        "populate_by_name": True,
+        "alias_generator": lambda name: "".join(
+            w if i == 0 else w.capitalize() for i, w in enumerate(name.split("_"))
+        ),
+    }
+
+
+def _run_dataset_version_id(run: ALRun) -> str | None:
+    """Read the dataset version id the AL run was created against (if stored)."""
+    if not run.params_json:
+        return None
+    try:
+        params = json.loads(run.params_json)
+    except Exception:
+        return None
+    if isinstance(params, dict):
+        val = params.get("dataset_version_id")
+        if isinstance(val, str) and val:
+            return val
+    return None
+
+
+def _dataset_task_type(db: Session, dataset_version_id: str) -> str | None:
+    """Resolve the dataset's task_type via a dataset version, if available."""
+    from app.models.dataset import Dataset
+
+    version = db.get(DatasetVersion, dataset_version_id)
+    if version is None:
+        return None
+    dataset = db.get(Dataset, version.dataset_id)
+    return getattr(dataset, "task_type", None) if dataset is not None else None
+
+
+@router.get("/runs/{al_run_id}/progress")
+def get_al_progress(
+    al_run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    run = db.get(ALRun, al_run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="AL run not found")
+    authz.require_project_access(db, current_user, run.project_id, Role.VIEWER)
+    stats = resolution_stats(db, al_run_id)
+    return {
+        "al_run_id": run.id,
+        "total": stats["total"],
+        "resolved": stats["resolved"],
+        "pending": stats["pending"],
+        "last_train_run_id": run.last_train_run_id,
+    }
+
+
+@router.post("/runs/{al_run_id}/retrain", status_code=201)
+def retrain_from_resolved(
+    al_run_id: str,
+    body: ALRetrainRequest | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    run = db.get(ALRun, al_run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="AL run not found")
+    authz.require_project_access(db, current_user, run.project_id, Role.DEVELOPER)
+
+    body = body or ALRetrainRequest()
+
+    # Must have at least one resolved item — retraining only makes sense once a
+    # human has curated the uncertain samples.
+    stats = resolution_stats(db, al_run_id)
+    if stats["resolved"] < 1:
+        raise HTTPException(status_code=409, detail="no resolved items to retrain on")
+
+    # Prefer the dataset version the AL run was created against; fall back to the
+    # request body.
+    dataset_version_id = _run_dataset_version_id(run) or body.dataset_version_id
+    if not dataset_version_id:
+        raise HTTPException(status_code=400, detail="dataset_version_id could not be determined")
+
+    task = body.task or _dataset_task_type(db, dataset_version_id) or "detect"
+
+    kwargs: dict = {
+        "task": task,
+        "name": "AL Retrain",
+        "owner_id": current_user.id,
+        "cluster_id": body.cluster_id,
+    }
+    if body.framework:
+        kwargs["framework"] = body.framework
+    if body.base_model:
+        kwargs["base_model"] = body.base_model
+    if body.params:
+        kwargs["params"] = body.params
+
+    try:
+        result = training_service.launch_training(db, run.project_id, dataset_version_id, **kwargs)
+    except training_service.TaskTypeMismatch as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except training_service.TrainingDispatchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    train_run_id = result.get("experimentId") or result.get("id")
+    run.last_train_run_id = train_run_id
+    db.add(run)
+    db.commit()
+
+    return {
+        "al_run_id": run.id,
+        "train_run_id": train_run_id,
+        "job_id": result.get("jobId") or result.get("id"),
+        "status": result.get("status", "queued"),
+        "resolved_count": stats["resolved"],
     }

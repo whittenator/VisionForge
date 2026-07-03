@@ -3,6 +3,32 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable
 
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.models.alitem import ALItem
+
+
+def resolution_stats(db: Session, al_run_id: str) -> dict[str, int]:
+    """Return {total, resolved, pending} item counts for an AL run.
+
+    ``resolved`` counts any item whose ``resolved_status`` is not ``pending``;
+    everything else (including ``NULL``) is treated as pending.
+    """
+    total = (
+        db.scalar(select(func.count()).select_from(ALItem).where(ALItem.al_run_id == al_run_id))
+        or 0
+    )
+    resolved = (
+        db.scalar(
+            select(func.count())
+            .select_from(ALItem)
+            .where(ALItem.al_run_id == al_run_id, ALItem.resolved_status == "resolved")
+        )
+        or 0
+    )
+    return {"total": int(total), "resolved": int(resolved), "pending": int(total) - int(resolved)}
+
 
 def select_uncertain(scores: Iterable[float], k: int) -> list[int]:
     # Higher score = more uncertain
