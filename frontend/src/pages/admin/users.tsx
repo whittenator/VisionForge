@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
@@ -6,9 +6,12 @@ import Badge from '@/components/ui/Badge';
 import Alert from '@/components/ui/Alert';
 import Loading from '@/components/common/Loading';
 import EmptyState from '@/components/common/EmptyState';
-import { apiGet } from '@/services/api';
+import { apiGet, apiPost } from '@/services/api';
 
-interface Workspace { id: string; name: string; }
+interface Workspace {
+  id: string;
+  name: string;
+}
 interface Member {
   id: string;
   user_id: string;
@@ -22,23 +25,37 @@ const ROLES = ['viewer', 'annotator', 'developer', 'admin', 'owner'];
 
 function roleVariant(role: string): 'default' | 'success' | 'warning' | 'danger' {
   switch (role) {
-    case 'owner':     return 'danger';
-    case 'admin':     return 'warning';
-    case 'developer': return 'success';
-    default:          return 'default';
+    case 'owner':
+      return 'danger';
+    case 'admin':
+      return 'warning';
+    case 'developer':
+      return 'success';
+    default:
+      return 'default';
   }
 }
 
 export default function AdminUsers() {
-  const [workspaces, setWorkspaces]           = useState<Workspace[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWorkspace, setSelectedWorkspace] = useState<string>('');
-  const [members, setMembers]                 = useState<Member[]>([]);
-  const [loading, setLoading]                 = useState(true);
-  const [membersLoading, setMembersLoading]   = useState(false);
-  const [error, setError]                     = useState<string | null>(null);
-  const [inviteEmail, setInviteEmail]         = useState('');
-  const [inviteRole, setInviteRole]           = useState('annotator');
-  const [inviteMsg, setInviteMsg]             = useState<string | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('annotator');
+  const [inviteSubmitting, setInviteSubmitting] = useState(false);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+
+  const loadMembers = useCallback((workspaceId: string) => {
+    setMembersLoading(true);
+    return apiGet<Member[]>(`/api/workspaces/${workspaceId}/members`)
+      .then(setMembers)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load members'))
+      .finally(() => setMembersLoading(false));
+  }, []);
 
   useEffect(() => {
     apiGet<Workspace[]>('/api/workspaces')
@@ -52,19 +69,31 @@ export default function AdminUsers() {
 
   useEffect(() => {
     if (!selectedWorkspace) return;
-    setMembersLoading(true);
-    apiGet<Member[]>(`/api/workspaces/${selectedWorkspace}/members`)
-      .then(setMembers)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load members'))
-      .finally(() => setMembersLoading(false));
-  }, [selectedWorkspace]);
+    // Reset invite feedback when switching workspaces.
+    setInviteSuccess(null);
+    setInviteError(null);
+    loadMembers(selectedWorkspace);
+  }, [selectedWorkspace, loadMembers]);
 
-  function handleInviteSubmit(e: React.FormEvent) {
+  async function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!inviteEmail) return;
-    setInviteMsg(`Invitation for ${inviteEmail} (${inviteRole}) would be sent. Invite endpoint not yet implemented.`);
-    setInviteEmail('');
-    setInviteRole('annotator');
+    if (!inviteEmail || !selectedWorkspace) return;
+    setInviteSubmitting(true);
+    setInviteSuccess(null);
+    setInviteError(null);
+    try {
+      await apiPost(`/api/workspaces/${selectedWorkspace}/members`, {
+        email: inviteEmail,
+        role: inviteRole,
+      });
+      setInviteSuccess(`${inviteEmail} was added to the workspace as ${inviteRole}.`);
+      setInviteEmail('');
+      await loadMembers(selectedWorkspace);
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to invite member.');
+    } finally {
+      setInviteSubmitting(false);
+    }
   }
 
   const currentWorkspace = workspaces.find((w) => w.id === selectedWorkspace);
@@ -82,20 +111,28 @@ export default function AdminUsers() {
       {/* Workspace selector */}
       {workspaces.length > 1 && (
         <div className="flex items-center gap-3">
-          <label htmlFor="workspace-select" className="label-overline whitespace-nowrap">Workspace</label>
+          <label htmlFor="workspace-select" className="label-overline whitespace-nowrap">
+            Workspace
+          </label>
           <Select
             id="workspace-select"
             value={selectedWorkspace}
             onChange={(e) => setSelectedWorkspace(e.target.value)}
             className="max-w-xs"
           >
-            {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
           </Select>
         </div>
       )}
 
       {loading ? (
-        <div className="py-6"><Loading label="Loading workspaces…" /></div>
+        <div className="py-6">
+          <Loading label="Loading workspaces…" />
+        </div>
       ) : (
         <>
           {/* Members table */}
@@ -108,10 +145,15 @@ export default function AdminUsers() {
             </div>
 
             {membersLoading ? (
-              <div className="px-4 py-4"><Loading label="Loading members…" /></div>
+              <div className="px-4 py-4">
+                <Loading label="Loading members…" />
+              </div>
             ) : members.length === 0 ? (
               <div className="px-4 py-4">
-                <EmptyState title="No members" description="Invite people to collaborate in this workspace." />
+                <EmptyState
+                  title="No members"
+                  description="Invite people to collaborate in this workspace."
+                />
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -133,15 +175,22 @@ export default function AdminUsers() {
                         className="border-b border-[var(--hud-border-subtle)] last:border-0 hover:bg-[var(--hud-elevated)] transition-colors"
                       >
                         <td className="px-4 py-2">
-                          <div data-testid="user-email" className="font-medium text-[var(--hud-text-primary)] text-xs">
+                          <div
+                            data-testid="user-email"
+                            className="font-medium text-[var(--hud-text-primary)] text-xs"
+                          >
                             {m.email || m.username || m.user_id.slice(0, 12)}
                           </div>
                           {m.email && m.username && (
-                            <div className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">{m.username}</div>
+                            <div className="text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">
+                              {m.username}
+                            </div>
                           )}
                         </td>
                         <td className="px-4 py-2">
-                          <Badge data-testid="user-role" variant={roleVariant(m.role)}>{m.role}</Badge>
+                          <Badge data-testid="user-role" variant={roleVariant(m.role)}>
+                            {m.role}
+                          </Badge>
                         </td>
                         {m.joined_at && (
                           <td className="px-4 py-2 text-xs font-mono text-[var(--hud-text-muted)]">
@@ -164,7 +213,8 @@ export default function AdminUsers() {
             </div>
             <div className="p-4">
               <p className="text-xs text-[var(--hud-text-muted)] mb-4">
-                Invite a new member to the workspace by email.
+                Invite an existing member to the workspace by email. The person must already have a
+                VisionForge account.
               </p>
               <form
                 onSubmit={handleInviteSubmit}
@@ -172,7 +222,9 @@ export default function AdminUsers() {
                 aria-label="Create user form"
               >
                 <div className="space-y-1 flex-1 min-w-[200px]">
-                  <label htmlFor="invite-email" className="label-overline block">Email</label>
+                  <label htmlFor="invite-email" className="label-overline block">
+                    Email
+                  </label>
                   <Input
                     id="invite-email"
                     aria-label="Email"
@@ -183,7 +235,9 @@ export default function AdminUsers() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor="invite-role" className="label-overline block">Role</label>
+                  <label htmlFor="invite-role" className="label-overline block">
+                    Role
+                  </label>
                   <Select
                     id="invite-role"
                     aria-label="Role"
@@ -191,13 +245,32 @@ export default function AdminUsers() {
                     onChange={(e) => setInviteRole(e.target.value)}
                   >
                     {ROLES.map((r) => (
-                      <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
+                      <option key={r} value={r}>
+                        {r.charAt(0).toUpperCase() + r.slice(1)}
+                      </option>
                     ))}
                   </Select>
                 </div>
-                <Button aria-label="Create user" type="submit">Send Invite</Button>
+                <Button aria-label="Create user" type="submit" disabled={inviteSubmitting}>
+                  {inviteSubmitting ? 'Inviting…' : 'Send Invite'}
+                </Button>
               </form>
-              {inviteMsg && <Alert variant="info" className="mt-3">{inviteMsg}</Alert>}
+              {inviteSuccess && (
+                <Alert variant="success" className="mt-3">
+                  {inviteSuccess}
+                </Alert>
+              )}
+              {inviteError && (
+                <Alert variant="error" className="mt-3">
+                  {inviteError}
+                  {/^user not found/i.test(inviteError) && (
+                    <span className="block mt-1 text-xs">
+                      Only people who already have a VisionForge account can be added. Ask them to
+                      sign up first, then invite them again.
+                    </span>
+                  )}
+                </Alert>
+              )}
             </div>
           </div>
         </>
