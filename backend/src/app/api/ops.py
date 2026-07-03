@@ -206,3 +206,94 @@ def trigger_frame_extraction(
             status_code=503, detail=f"failed to dispatch frame extraction: {exc}"
         ) from exc
     return {"jobId": job.id, "status": "queued", "fpsInterval": fps_interval}
+
+
+@router.post("/datasets/{dataset_id}/prelabel", status_code=202)
+def trigger_prelabel(
+    dataset_id: str,
+    artifact_id: str | None = Query(None),
+    version_id: str | None = Query(None),
+    conf_threshold: float = Query(0.25, ge=0, le=1),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Queue a dataset-wide prelabel Celery task.
+
+    Runs a trained model over the target version's unlabeled assets, persisting
+    predicted annotations. The model defaults to the latest successful artifact
+    trained on this dataset; the version defaults to the dataset's newest one.
+    """
+    authz.require_dataset_access(db, current_user, dataset_id, Role.DEVELOPER)
+    from app.jobs.celery_app import celery_app
+    from app.models.artifact import ModelArtifact
+    from app.models.dataset import Dataset
+    from app.services import suggestion_service
+    from app.services.jobs_service import create_job, update_job_status
+
+    dataset = db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # Resolve the target version: explicit id (must belong to the dataset), else
+    # the dataset's newest version.
+    if version_id is not None:
+        version = db.get(DatasetVersion, version_id)
+        if version is None or version.dataset_id != dataset_id:
+            raise HTTPException(status_code=400, detail="version does not belong to dataset")
+    else:
+        version = (
+            db.query(DatasetVersion)
+            .filter(DatasetVersion.dataset_id == dataset_id)
+            .order_by(DatasetVersion.version.desc())
+            .first()
+        )
+        if version is None:
+            raise HTTPException(status_code=409, detail="dataset has no versions to prelabel")
+
+    # Resolve the model artifact: explicit id, else the latest successful model
+    # trained on this dataset.
+    if artifact_id is not None:
+        artifact = db.get(ModelArtifact, artifact_id)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail="model artifact not found")
+    else:
+        artifact = suggestion_service.latest_artifact_for_dataset(db, dataset_id)
+    if artifact is None or not artifact.storage_path:
+        raise HTTPException(
+            status_code=409,
+            detail="no trained model available for this dataset; train a model first",
+        )
+
+    job = create_job(
+        db,
+        "prelabel",
+        {
+            "datasetVersionId": version.id,
+            "modelKey": artifact.storage_path,
+            "task": dataset.task_type or "detect",
+            "confThreshold": float(conf_threshold),
+        },
+    )
+    try:
+        celery_app.send_task(
+            "app.jobs.tasks.prelabels.apply_prelabels",
+            args=[
+                {
+                    "jobId": job.id,
+                    "datasetVersionId": version.id,
+                    "modelKey": artifact.storage_path,
+                    "task": dataset.task_type or "detect",
+                    "confThreshold": float(conf_threshold),
+                }
+            ],
+        )
+    except Exception as exc:
+        # Don't leave the job stuck in `queued` if dispatch fails.
+        try:
+            update_job_status(db, job.id, status="failed", progress=0.0)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=502, detail=f"failed to dispatch prelabel job: {exc}"
+        ) from exc
+    return {"jobId": job.id, "status": "queued"}
