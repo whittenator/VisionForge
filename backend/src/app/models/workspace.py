@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -28,6 +28,11 @@ class Workspace(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     region: Mapped[str] = mapped_column(String(10), nullable=False, default="US")
+    # Object-storage backend for this workspace: "minio" (default) or "s3".
+    storage_backend: Mapped[str] = mapped_column(String(20), nullable=False, default="minio")
+    # JSON blob of backend settings (endpoint/bucket/region/keys). Secret keys
+    # are write-only from the API and never returned in responses.
+    storage_config: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
 
