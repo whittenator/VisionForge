@@ -21,6 +21,7 @@ from app.services.asset_service import (
     get_dataset_stats,
     list_assets,
 )
+from app.services.similarity_service import find_duplicates, find_similar
 
 router = APIRouter(prefix="/api", tags=["assets"])
 
@@ -298,6 +299,118 @@ def get_asset_neighbors(
         "index": index_before,
         "total": total,
     }
+
+
+@router.get("/assets/{asset_id}/similar")
+def get_similar_assets(
+    asset_id: str = Path(...),
+    k: int = Query(20, ge=1, le=100),
+    dataset_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the nearest neighbours of an asset by embedding cosine distance."""
+    from app.models.asset import Asset
+
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    authz.require_dataset_access(db, current_user, asset.dataset_id, Role.VIEWER)
+
+    scope = dataset_id or asset.dataset_id
+    if dataset_id and dataset_id != asset.dataset_id:
+        authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
+
+    neighbors = find_similar(db, asset_id, k=k, dataset_id=scope)
+    return {
+        "query_asset_id": asset_id,
+        "items": [
+            {
+                "id": neighbor.id,
+                "uri": neighbor.uri,
+                "download_url": _presign_download(neighbor.uri),
+                "distance": distance,
+                "label_status": neighbor.label_status,
+            }
+            for neighbor, distance in neighbors
+        ],
+    }
+
+
+@router.get("/datasets/{dataset_id}/duplicates")
+def get_dataset_duplicates(
+    dataset_id: str = Path(...),
+    threshold: float = Query(0.05, ge=0.0, le=2.0),
+    limit: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return near-duplicate asset pairs within a dataset."""
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
+    result = find_duplicates(db, dataset_id, threshold=threshold, max_pairs=limit)
+
+    def _serialize(asset) -> dict:
+        return {
+            "id": asset.id,
+            "uri": asset.uri,
+            "download_url": _presign_download(asset.uri),
+        }
+
+    return {
+        "pairs": [
+            {
+                "distance": pair["distance"],
+                "asset_a": _serialize(pair["asset_a"]),
+                "asset_b": _serialize(pair["asset_b"]),
+            }
+            for pair in result["pairs"]
+        ],
+        "total": result["total"],
+        "computed": result["computed"],
+        "truncated": result["truncated"],
+    }
+
+
+@router.post("/datasets/{dataset_id}/embeddings", status_code=202)
+def queue_dataset_embeddings(
+    dataset_id: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Dispatch the Celery task that (re)generates embeddings for a dataset.
+
+    Targets the newest dataset version so the UI can build embeddings before
+    running duplicate detection or similarity search.
+    """
+    from sqlalchemy import select
+
+    from app.jobs.celery_app import celery_app
+    from app.services.jobs_service import create_job, update_job_status
+
+    authz.require_dataset_access(db, current_user, dataset_id, Role.DEVELOPER)
+
+    version = db.scalars(
+        select(DatasetVersion)
+        .where(DatasetVersion.dataset_id == dataset_id)
+        .order_by(DatasetVersion.version.desc())
+    ).first()
+    if version is None:
+        raise HTTPException(status_code=400, detail="dataset has no versions")
+
+    job = create_job(db, "embeddings", {"datasetVersionId": version.id})
+    try:
+        celery_app.send_task(
+            "app.jobs.tasks.embeddings.generate_embeddings",
+            args=[{"jobId": job.id, "datasetVersionId": version.id}],
+        )
+    except Exception as exc:
+        try:
+            update_job_status(db, job.id, status="failed", progress=0.0)
+        except Exception:
+            pass
+        raise HTTPException(status_code=503, detail=f"failed to dispatch task: {exc}") from exc
+
+    return {"jobId": job.id, "status": "queued", "datasetVersionId": version.id}
 
 
 @router.post("/ingest/confirm", status_code=201)

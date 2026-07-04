@@ -36,6 +36,9 @@ class ExperimentRun(Base):
         "metrics", Text, nullable=True
     )  # DB column "metrics" mapped to metrics_json
     artifacts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # JSON list of intermediate checkpoint records ({epoch, key, metric}) saved
+    # during training so a run can be resumed from the latest checkpoint.
+    checkpoints: Mapped[str | None] = mapped_column(Text, nullable=True)
     code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)

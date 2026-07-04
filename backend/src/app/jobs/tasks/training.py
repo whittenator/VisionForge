@@ -146,6 +146,10 @@ def train_task(payload: dict) -> dict:
         # Single metrics blob persisted throughout: per-epoch history, the
         # resolved split, a final summary, and links to generated plots.
         epoch_metrics: list[dict] = []
+        # Intermediate checkpoint records ({epoch, key, metric}) persisted on
+        # ``run.checkpoints`` so a future run can resume from the latest one.
+        checkpoint_records: list[dict] = []
+        _MAX_CHECKPOINTS = 5
         metrics_blob: dict[str, Any] = {
             "framework": framework,
             "epochs": epoch_metrics,
@@ -159,7 +163,41 @@ def train_task(payload: dict) -> dict:
         db.add(run)
         db.commit()
 
-        def report(progress: float | None = None, epoch: dict | None = None) -> None:
+        def persist_checkpoint(local_path: str | Path, epoch: dict | None) -> None:
+            """Upload a checkpoint file and record it on ``run.checkpoints``.
+
+            Defensive by design: a missing file or any storage error is skipped
+            silently so checkpointing can never fail the training run.
+            """
+            if not local_path or minio_client is None:
+                return
+            try:
+                path = Path(local_path)
+                if not path.exists():
+                    return
+                epoch_num = (epoch or {}).get("epoch", len(checkpoint_records))
+                key = f"models/{experiment_id}/checkpoints/epoch_{epoch_num}.pt"
+                minio_client.fput_object(bucket, key, str(path))
+                metric = None
+                if epoch:
+                    for mk in ("mAP50_95", "mAP50", "top1", "loss"):
+                        if epoch.get(mk) is not None:
+                            metric = epoch.get(mk)
+                            break
+                checkpoint_records.append({"epoch": epoch_num, "key": key, "metric": metric})
+                # Keep only the most recent N records to bound storage/metadata.
+                del checkpoint_records[:-_MAX_CHECKPOINTS]
+                run.checkpoints = json.dumps(checkpoint_records)
+                db.add(run)
+                db.commit()
+            except Exception:
+                pass
+
+        def report(
+            progress: float | None = None,
+            epoch: dict | None = None,
+            checkpoint: str | None = None,
+        ) -> None:
             """Uniform progress/metrics callback handed to every trainer."""
             if epoch is not None:
                 epoch_metrics.append(epoch)
@@ -169,6 +207,8 @@ def train_task(payload: dict) -> dict:
                     db.commit()
                 except Exception:
                     pass
+            if checkpoint is not None:
+                persist_checkpoint(checkpoint, epoch)
             if progress is not None and job_id:
                 try:
                     update_job_status(db, job_id, status="running", progress=progress)
@@ -206,6 +246,12 @@ def train_task(payload: dict) -> dict:
                 train_result = None
 
             best_pt_path = train_result.best_model_path if train_result else None
+
+            # Ensure at least one resumable checkpoint is stored even if no
+            # per-epoch checkpoint made it through (e.g. short runs).
+            if train_result and train_result.latest_checkpoint_path:
+                final_epoch = epoch_metrics[-1] if epoch_metrics else None
+                persist_checkpoint(train_result.latest_checkpoint_path, final_epoch)
 
             # Persist the trained model artifact.
             if best_pt_path and minio_client:

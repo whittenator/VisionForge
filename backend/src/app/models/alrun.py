@@ -19,4 +19,7 @@ class ALRun(Base):
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False)
     strategy: Mapped[str] = mapped_column(String(32), nullable=False)
     params_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The experiment run kicked off from this AL run's resolved items (retrain
+    # feedback loop). Null until a retrain is triggered.
+    last_train_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), server_default=func.now())

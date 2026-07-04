@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.deps import get_current_user, get_db
+from app.db.deps import get_current_user, get_db, security
 from app.models.experiment import ExperimentRun as ExperimentModel
 from app.models.project import Project
 from app.models.user import User
@@ -109,17 +112,15 @@ def create_run(
     return _run_to_schema(run)
 
 
-@router.get("/runs/{runId}/metrics")
-def get_metrics(
-    runId: str = Path(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Return per-epoch metrics for live chart display."""
-    e = db.get(ExperimentModel, runId)
-    if not e:
-        raise HTTPException(status_code=404, detail="Run not found")
-    authz.require_project_access(db, current_user, e.project_id, Role.VIEWER)
+def _build_metrics_payload(run_id: str, e: ExperimentModel) -> dict:
+    """Parse an ``ExperimentRun``'s ``metrics_json`` into the metrics response shape.
+
+    Shared by :func:`get_metrics` (the JSON snapshot) and the SSE stream so the two
+    can't drift. ``metrics_json`` may be:
+      - a list of epoch dicts: ``[{epoch, mAP50, ...}, ...]``
+      - ``{"epochs": [...], "summary": {...}, "plots": [...], "split": {...}}``
+      - ``{"error": "..."}`` on failure
+    """
     metrics: list = []
     summary: dict | None = None
     plots: list = []
@@ -127,10 +128,6 @@ def get_metrics(
     if e.metrics_json:
         try:
             data = json.loads(e.metrics_json)
-            # metrics_json may be:
-            #   - a list of epoch dicts: [{epoch, mAP50, ...}, ...]
-            #   - {"epochs": [...], "summary": {...}, "plots": [...], "split": {...}}
-            #   - {"error": "..."} on failure
             if isinstance(data, list):
                 metrics = data
             elif isinstance(data, dict):
@@ -167,13 +164,93 @@ def get_metrics(
         except Exception:
             pass
     return {
-        "run_id": runId,
+        "run_id": run_id,
         "status": e.status,
         "metrics": metrics,
         "summary": summary,
         "plots": plots,
         "split": split,
     }
+
+
+@router.get("/runs/{runId}/metrics")
+def get_metrics(
+    runId: str = Path(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return per-epoch metrics for live chart display."""
+    e = db.get(ExperimentModel, runId)
+    if not e:
+        raise HTTPException(status_code=404, detail="Run not found")
+    authz.require_project_access(db, current_user, e.project_id, Role.VIEWER)
+    return _build_metrics_payload(runId, e)
+
+
+_TERMINAL_STATUSES = ("succeeded", "failed", "cancelled")
+
+
+@router.get("/runs/{runId}/metrics/stream")
+async def stream_metrics(
+    runId: str = Path(...),
+    token: str | None = Query(None),
+    db: Session = Depends(get_db),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+):
+    """Server-Sent Events stream of live per-epoch metrics for a run.
+
+    Auth mirrors the job stream in ``main.py``: a standard ``Authorization: Bearer``
+    header, or a ``?token=`` query parameter for ``EventSource`` clients (which
+    cannot set headers). Each tick re-reads the run's metrics from a short-lived DB
+    session and emits ``data: {json}`` with the same shape as ``get_metrics`` — only
+    when the payload changed. A final event carrying ``done: true`` is emitted once
+    the run reaches a terminal state.
+    """
+    from app.db.session import SessionLocal
+    from app.services.auth import get_current_user_from_token
+
+    raw_token = credentials.credentials if credentials else token
+    if not raw_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user = get_current_user_from_token(raw_token, db)
+    run = db.get(ExperimentModel, runId)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    authz.require_project_access(db, user, run.project_id, Role.VIEWER)
+
+    async def event_generator():
+        last_payload: dict | None = None
+        for _ in range(300):  # ~10 minutes at a 2s interval
+            # Short-lived session per tick — never hold the request-scoped
+            # session open across an ``await``.
+            with SessionLocal() as tick_db:
+                e = tick_db.get(ExperimentModel, runId)
+                if not e:
+                    yield f"data: {json.dumps({'error': 'not_found'})}\n\n"
+                    break
+                payload = _build_metrics_payload(runId, e)
+                status = e.status
+            if payload != last_payload:
+                yield f"data: {json.dumps(payload)}\n\n"
+                last_payload = payload
+            if status in _TERMINAL_STATUSES:
+                yield f"data: {json.dumps({**payload, 'done': True})}\n\n"
+                break
+            await asyncio.sleep(2)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @router.get("/runs/{runId}/plots/{name}")

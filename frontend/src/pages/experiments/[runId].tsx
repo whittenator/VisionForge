@@ -4,7 +4,8 @@ import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import Loading from '@/components/common/Loading';
 import ErrorState from '@/components/common/ErrorState';
-import { apiGet, apiPost } from '@/services/api';
+import { apiGet, apiPost, apiUrl } from '@/services/api';
+import { getStoredToken } from '@/services/token-store';
 
 interface Run {
   id: string;
@@ -248,6 +249,39 @@ export default function ExperimentDetail() {
     }, 3000);
     return () => clearInterval(interval);
   }, [runId]);
+
+  // Live metrics via Server-Sent Events while the run is active. This gives
+  // near-real-time chart updates; the 3s polling loop above stays running as a
+  // fallback (and keeps run status fresh) so an EventSource failure is transparent.
+  useEffect(() => {
+    if (!runId) return;
+    const status = run?.status;
+    if (status !== 'running' && status !== 'queued') return;
+    const token = getStoredToken();
+    const url = apiUrl(
+      `/api/experiments/runs/${runId}/metrics/stream${
+        token ? `?token=${encodeURIComponent(token)}` : ''
+      }`,
+    );
+    const es = new EventSource(url);
+    es.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data) as MetricsResponse & { done?: boolean; error?: string };
+        if (data.error) return;
+        // Feed the exact same state the poll handler sets — chart render logic
+        // is unchanged.
+        setM(data);
+        if (data.done) es.close();
+      } catch {
+        /* ignore malformed frame */
+      }
+    };
+    es.onerror = () => {
+      // Fall back to the polling loop, which continues running independently.
+      es.close();
+    };
+    return () => es.close();
+  }, [runId, run?.status]);
 
   async function handleExport() {
     if (!run) return;

@@ -110,6 +110,18 @@ export default function DatasetDetail() {
             >
               METRICS
             </Link>
+            <Link
+              to={`/datasets/${dataset.id}/browse`}
+              className="inline-flex items-center h-8 px-3 text-xs font-mono border border-[var(--hud-border-strong)] text-[var(--hud-text-secondary)] hover:border-[var(--hud-accent)] hover:text-[var(--hud-accent)] transition-colors tracking-wide"
+            >
+              BROWSE
+            </Link>
+            <Link
+              to={`/datasets/${dataset.id}/duplicates`}
+              className="inline-flex items-center h-8 px-3 text-xs font-mono border border-[var(--hud-border-strong)] text-[var(--hud-text-secondary)] hover:border-[var(--hud-accent)] hover:text-[var(--hud-accent)] transition-colors tracking-wide"
+            >
+              DUPLICATES
+            </Link>
             {latestVersion && (
               <>
                 <Link

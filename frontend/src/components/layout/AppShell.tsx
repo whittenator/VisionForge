@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { to: '/active-learning',  label: 'ACTIVE LEARN'},
   { to: '/clusters',         label: 'CLUSTERS'    },
   { to: '/admin/users',      label: 'ADMIN'       },
+  { to: '/settings/storage', label: 'SETTINGS'    },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
