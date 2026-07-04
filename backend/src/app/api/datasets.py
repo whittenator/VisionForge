@@ -25,6 +25,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.models.workspace import Membership, Role
 from app.services import authz, datumaro_service
+from app.services.dataset_recommendations_service import generate_recommendations
 from app.services.dataset_service import snapshot_version
 from app.services.project_dataset_service import create_dataset as svc_create_dataset
 
@@ -367,6 +368,24 @@ async def import_dataset(
         "classes": summary.classes,
         "warnings": summary.warnings,
     }
+
+
+@router.get("/datasets/{dataset_id}/recommendations")
+def get_dataset_recommendations(
+    dataset_id: str = Path(...),
+    version_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Server-driven "suggested improvements" for a dataset.
+
+    Derives a prioritized list of actionable recommendations (class imbalance,
+    coverage gaps, empty images, small dataset, tiny objects, etc.) from the
+    dataset's health metrics.
+    """
+    authz.require_dataset_access(db, current_user, dataset_id, Role.VIEWER)
+    items = generate_recommendations(db, dataset_id, version_id=version_id)
+    return {"items": items, "generated_from_version": version_id}
 
 
 @router.get("/datasets/{dataset_id}/export")

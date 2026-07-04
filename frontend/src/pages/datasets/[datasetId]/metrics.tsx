@@ -42,6 +42,28 @@ interface Metrics {
   split: unknown;
 }
 
+type Severity = 'high' | 'medium' | 'low';
+
+interface Recommendation {
+  id: string;
+  severity: Severity;
+  category: string;
+  title: string;
+  detail: string;
+  metric?: number | string | null;
+}
+
+interface RecommendationsResponse {
+  items: Recommendation[];
+  generated_from_version: string | null;
+}
+
+const SEVERITY_STYLES: Record<Severity, string> = {
+  high: 'border-[var(--hud-danger)] text-[var(--hud-danger)]',
+  medium: 'border-[var(--hud-warning)] text-[var(--hud-warning)]',
+  low: 'border-[var(--hud-info)] text-[var(--hud-info)]',
+};
+
 const toBuckets = (rec: Record<string, number>) =>
   Object.entries(rec).map(([label, value]) => ({ label, value }));
 
@@ -70,6 +92,7 @@ function Panel({
 export default function DatasetMetrics() {
   const { datasetId } = useParams();
   const [m, setM] = useState<Metrics | null>(null);
+  const [recs, setRecs] = useState<Recommendation[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -83,6 +106,13 @@ export default function DatasetMetrics() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load metrics'))
       .finally(() => setLoading(false));
+  }, [datasetId]);
+
+  useEffect(() => {
+    if (!datasetId) return;
+    apiGet<RecommendationsResponse>(`/api/datasets/${datasetId}/recommendations`)
+      .then((d) => setRecs(d.items))
+      .catch(() => setRecs([]));
   }, [datasetId]);
 
   if (loading) {
@@ -156,6 +186,43 @@ export default function DatasetMetrics() {
         />
       </div>
 
+      {/* Suggested improvements */}
+      <Panel
+        title="Suggested improvements"
+        hint={recs && recs.length > 0 ? `${recs.length} item(s)` : undefined}
+      >
+        {recs === null ? (
+          <div className="flex items-center gap-2 font-mono text-xs text-[var(--hud-text-muted)]">
+            <Spinner size={12} /> Analyzing…
+          </div>
+        ) : recs.length === 0 ? (
+          <div className="font-mono text-xs text-[var(--hud-success)]">
+            No issues found — dataset looks healthy.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {recs.map((r) => (
+              <li
+                key={r.id}
+                className="flex items-start gap-3 border border-[var(--hud-border-subtle)] bg-[var(--hud-surface)] p-3"
+              >
+                <span
+                  className={`mt-0.5 shrink-0 border px-1.5 py-0.5 font-mono text-[0.625rem] uppercase ${SEVERITY_STYLES[r.severity]}`}
+                >
+                  {r.severity}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-[var(--hud-text-primary)]">
+                    {r.title}
+                  </div>
+                  <div className="text-xs text-[var(--hud-text-muted)]">{r.detail}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+
       {/* Coverage + review donuts */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel title="Label coverage">
@@ -191,22 +258,6 @@ export default function DatasetMetrics() {
             : undefined
         }
       >
-        {m.class_balance.imbalance_ratio && m.class_balance.imbalance_ratio >= 10 && (
-          <div className="mb-3">
-            <Alert variant="warning">
-              High class imbalance ({m.class_balance.imbalance_ratio}× between the most and least
-              frequent class). Consider collecting more examples of rare classes.
-            </Alert>
-          </div>
-        )}
-        {m.class_balance.unused_classes.length > 0 && (
-          <div className="mb-3">
-            <Alert variant="info">
-              {m.class_balance.unused_classes.length} defined class(es) have no annotations:{' '}
-              <span className="font-mono">{m.class_balance.unused_classes.join(', ')}</span>
-            </Alert>
-          </div>
-        )}
         <BarChart data={classInstances} />
       </Panel>
 

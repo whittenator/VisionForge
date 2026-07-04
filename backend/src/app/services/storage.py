@@ -67,17 +67,55 @@ def ensure_bucket(client: Minio, bucket: str) -> None:
 
 
 def presign_put_url(
-    dataset_version_id: str, filename: str, content_type: str | None = None
+    dataset_version_id: str,
+    filename: str,
+    content_type: str | None = None,
+    workspace_id: str | None = None,
+    db: object | None = None,
 ) -> dict:
     """
     Build an object key and return a presigned PUT URL.
     Returns dict with keys: url, fields (empty for PUT compatibility with tests)
+
+    When ``workspace_id`` is provided, the URL is routed through that
+    workspace's configured object-storage backend (MinIO or S3). Without it,
+    the historical env-based MinIO behavior is preserved unchanged. A ``db``
+    session may be passed to avoid opening a fresh one; if omitted, one is
+    created for the lookup.
     """
-    bucket = os.getenv("S3_BUCKET", "visionforge")
     object_name = f"datasets/{dataset_version_id}/{filename}"
+    disabled = os.getenv("MINIO_DISABLED", "false").lower() == "true"
+    expires = int(os.getenv("MINIO_PRESIGN_EXPIRY_SECONDS", "3600"))
+
+    if workspace_id is not None:
+        from app.services import storage_backends
+
+        owns_session = db is None
+        if owns_session:
+            from app.db.session import SessionLocal
+
+            db = SessionLocal()
+        try:
+            settings = storage_backends.resolve_workspace_storage(db, workspace_id)
+        finally:
+            if owns_session and db is not None:
+                db.close()  # type: ignore[attr-defined]
+
+        if disabled:
+            return {
+                "url": f"https://minio.local/{settings.bucket}/{object_name}",
+                "fields": {},
+            }
+        url = storage_backends.presign_put_url(
+            settings, object_name, content_type=content_type, expires=expires
+        )
+        return {"url": url, "fields": {}}
+
+    # Legacy env-based MinIO path (unchanged behavior).
+    bucket = os.getenv("S3_BUCKET", "visionforge")
 
     # Allow running without a real MinIO by returning a dummy URL when disabled
-    if os.getenv("MINIO_DISABLED", "false").lower() == "true":
+    if disabled:
         return {"url": f"https://minio.local/{bucket}/{object_name}", "fields": {}}
 
     client = get_minio_client()
@@ -88,6 +126,5 @@ def presign_put_url(
         # In dev/test, ignore errors to keep contract green
         pass
 
-    expires = int(os.getenv("MINIO_PRESIGN_EXPIRY_SECONDS", "3600"))
     url = client.presigned_put_object(bucket, object_name, expires=expires)
     return {"url": url, "fields": {}}

@@ -18,6 +18,8 @@ import DatasetDetail from './pages/datasets/[datasetId]/index';
 import DatasetMetrics from './pages/datasets/[datasetId]/metrics';
 import DatasetAnnotateGateway from './pages/datasets/[datasetId]/annotate';
 import DatasetReviewQueue from './pages/datasets/[datasetId]/review';
+import DatasetBrowse from './pages/datasets/[datasetId]/browse';
+import DatasetDuplicates from './pages/datasets/[datasetId]/duplicates';
 import ExperimentsIndex from './pages/experiments/index';
 import ExperimentsNew from './pages/experiments/new';
 import ExperimentDetail from './pages/experiments/[runId]';
@@ -34,6 +36,7 @@ import EvaluationsNew from './pages/evaluations/new';
 import EvaluationDetail from './pages/evaluations/[evalId]';
 import ArtifactsPredict from './pages/artifacts/predict';
 import DatasetImport from './pages/datasets/import';
+import StorageSettings from './pages/settings/storage';
 import { apiGet } from '@/services/api';
 import Spinner from '@/components/ui/Spinner';
 
@@ -330,6 +333,22 @@ export default function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/datasets/:datasetId/browse"
+                element={
+                  <ProtectedRoute>
+                    <DatasetBrowse />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/datasets/:datasetId/duplicates"
+                element={
+                  <ProtectedRoute>
+                    <DatasetDuplicates />
+                  </ProtectedRoute>
+                }
+              />
               {/* Experiments */}
               <Route
                 path="/experiments"
@@ -479,6 +498,15 @@ export default function App() {
                 element={
                   <ProtectedRoute>
                     <AdminUsersPage />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Settings */}
+              <Route
+                path="/settings/storage"
+                element={
+                  <ProtectedRoute>
+                    <StorageSettings />
                   </ProtectedRoute>
                 }
               />

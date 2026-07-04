@@ -18,6 +18,11 @@ interface Dataset {
   name: string;
   latest_version_id?: string;
 }
+interface PriorRun {
+  id: string;
+  name?: string;
+  status?: string;
+}
 
 // Field schema, mirroring the backend FieldDef shape. The training form is
 // rendered entirely from the capabilities the backend reports, so no framework
@@ -45,6 +50,7 @@ interface FrameworkCapabilities {
   models_by_task: Record<string, string[]>;
   groups: FieldGroup[];
   device_options: string[];
+  supports_resume?: boolean;
 }
 
 const TASK_LABELS: Record<string, string> = {
@@ -239,6 +245,8 @@ export default function ExperimentsNew() {
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [priorRuns, setPriorRuns] = useState<PriorRun[]>([]);
+  const [resumeFrom, setResumeFrom] = useState('');
   const [frameworks, setFrameworks] = useState<FrameworkCapabilities[]>([]);
   const [run, setRun] = useState({
     projectId: preselectedProject,
@@ -302,11 +310,20 @@ export default function ExperimentsNew() {
   useEffect(() => {
     if (!run.projectId) {
       setDatasets([]);
+      setPriorRuns([]);
+      setResumeFrom('');
       return;
     }
     apiGet<{ items: Dataset[] }>(`/api/datasets?project_id=${run.projectId}&page=1&page_size=200`)
       .then((d) => setDatasets(d.items || []))
       .catch(console.error);
+    // Prior runs in this project are candidates to resume training from.
+    apiGet<{ items: PriorRun[] }>(
+      `/api/experiments/runs?project_id=${run.projectId}&page=1&page_size=100`,
+    )
+      .then((d) => setPriorRuns(d.items || []))
+      .catch(() => setPriorRuns([]));
+    setResumeFrom('');
   }, [run.projectId]);
 
   function setParam(key: string, value: number | boolean | string) {
@@ -367,6 +384,7 @@ export default function ExperimentsNew() {
           split_test: splitCfg.test,
           split_seed: splitCfg.seed,
           split_stratify: splitCfg.stratify,
+          ...(resumeFrom ? { resume_from: resumeFrom } : {}),
         },
       });
       setJobId(job.id);
@@ -539,6 +557,28 @@ export default function ExperimentsNew() {
                 </Select>
               </div>
             </div>
+            {caps?.supports_resume && (
+              <div>
+                <FieldLabel htmlFor="resume-from">Resume From (optional)</FieldLabel>
+                <Select
+                  id="resume-from"
+                  value={resumeFrom}
+                  onChange={(e) => setResumeFrom(e.target.value)}
+                  disabled={!run.projectId || priorRuns.length === 0}
+                >
+                  <option value="">— start fresh —</option>
+                  {priorRuns.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name || r.id}
+                      {r.status ? ` (${r.status})` : ''}
+                    </option>
+                  ))}
+                </Select>
+                <p className="mt-1 text-[0.6875rem] font-mono text-[var(--hud-text-muted)]">
+                  Continue training from a prior run&apos;s latest checkpoint.
+                </p>
+              </div>
+            )}
           </div>
         </Section>
 

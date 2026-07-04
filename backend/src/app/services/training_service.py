@@ -24,6 +24,35 @@ class TrainingDispatchError(Exception):
     """
 
 
+def _resolve_resume_key(db: Session, resume_from: str) -> str | None:
+    """Resolve ``resume_from`` to a checkpoint object-storage key.
+
+    ``resume_from`` is either a prior run id or an already-qualified storage key.
+    For a run id, prefer the latest recorded checkpoint, then fall back to that
+    run's ``best.pt`` artifact path. Returns None when nothing resumable exists.
+    """
+    ref = (resume_from or "").strip()
+    if not ref:
+        return None
+    # An explicit storage key (contains a path separator or points at a weight).
+    if "/" in ref or ref.endswith(".pt"):
+        return ref
+
+    prior = db.get(ExperimentRun, ref)
+    if prior is None:
+        return None
+    try:
+        checkpoints = json.loads(prior.checkpoints or "[]")
+    except (ValueError, TypeError):
+        checkpoints = []
+    if checkpoints:
+        latest = checkpoints[-1]
+        if isinstance(latest, dict) and latest.get("key"):
+            return str(latest["key"])
+    # Fall back to the run's best-model artifact conventionally stored here.
+    return f"models/{prior.id}/best.pt"
+
+
 def launch_training(
     db: Session,
     project_id: str,
@@ -35,6 +64,7 @@ def launch_training(
     owner_id: str | None = None,
     cluster_id: str | None = None,
     framework: str = "ultralytics",
+    resume_from: str | None = None,
 ) -> dict[str, Any]:
     # Reject obvious task/dataset mismatches so we don't burn cluster time on
     # a run we already know will fail (e.g. classify on a detection dataset).
@@ -67,6 +97,18 @@ def launch_training(
     full_params.setdefault("task", task)
     full_params.setdefault("framework", trainer.key)
     full_params.setdefault("base_model", base_model)
+
+    # Resume support: ``resume_from`` may arrive as an explicit kwarg or inside
+    # ``params`` (the /api/train endpoint forwards it via params). It references
+    # either a prior run id or a checkpoint object-storage key. Resolve it to a
+    # weights key so the worker can download and continue from those weights.
+    resume_from = resume_from or full_params.get("resume_from")
+    if resume_from:
+        full_params["resume_from"] = resume_from
+        resume_key = _resolve_resume_key(db, resume_from)
+        if resume_key:
+            full_params["resume_checkpoint_key"] = resume_key
+            full_params["resume"] = True
 
     # If a cluster was selected, reserve it before creating the run so we fail
     # fast (and don't leave orphan rows) when the cluster is unavailable.

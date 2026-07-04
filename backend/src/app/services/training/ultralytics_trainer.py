@@ -42,6 +42,7 @@ _METRIC_KEY_MAP = {
 # Allow-list of ``model.train()`` args users may tune. Keys absent here are
 # ignored so callers cannot inject unsafe/irrelevant kwargs.
 ULTRALYTICS_TRAIN_ARGS: dict[str, Any] = {
+    "resume": False,
     "epochs": 50,
     "imgsz": 640,
     "batch": 16,
@@ -231,6 +232,7 @@ class UltralyticsTrainer(Trainer):
             models_by_task=models_by_task,
             groups=groups,
             device_options=["cpu", "cuda", "mps", "0", "0,1"],
+            supports_resume=True,
         )
 
     def run(self, ctx: TrainContext) -> TrainResult:
@@ -238,6 +240,22 @@ class UltralyticsTrainer(Trainer):
 
         params = ctx.params
         base_model = params.get("base_model", "yolov8n.pt")
+
+        # Resume support: if a prior checkpoint was resolved to an object-storage
+        # key, download it into the scratch dir and train from it instead. The
+        # ``resume`` flag itself flows through ULTRALYTICS_TRAIN_ARGS below.
+        resume_key = params.get("resume_checkpoint_key")
+        if resume_key and ctx.minio_client is not None:
+            local_ckpt = ctx.work_dir / "resume.pt"
+            try:
+                ctx.minio_client.fget_object(ctx.bucket, resume_key, str(local_ckpt))
+                if local_ckpt.exists():
+                    base_model = str(local_ckpt)
+            except Exception:
+                # Missing/unreadable checkpoint should not abort the run; fall
+                # back to the configured base model.
+                pass
+
         dataset_dir = ctx.work_dir / "dataset"
 
         if ctx.task == "classify":
@@ -282,7 +300,14 @@ class UltralyticsTrainer(Trainer):
                 metrics_dict["loss"] = float(loss_val) if loss_val is not None else None
             entry = {"epoch": epoch_num, **_normalize_metrics(metrics_dict)}
             progress = 0.2 + 0.75 * (epoch_num / max(total_epochs, 1))
-            ctx.report(progress=progress, epoch=entry)
+            # Ultralytics writes ``last.pt`` each epoch; hand its path to the task
+            # so it can persist an intermediate, resumable checkpoint.
+            last_ckpt = getattr(trainer, "last", None)
+            ctx.report(
+                progress=progress,
+                epoch=entry,
+                checkpoint=str(last_ckpt) if last_ckpt else None,
+            )
 
         model.add_callback("on_train_epoch_end", on_train_epoch_end)
 
@@ -308,7 +333,14 @@ class UltralyticsTrainer(Trainer):
         results_dir = output_dir / "train"
         plot_files = [results_dir / f for f in _PLOT_FILES if (results_dir / f).exists()]
 
-        return TrainResult(best_model_path=best, plot_files=plot_files)
+        last = output_dir / "train" / "weights" / "last.pt"
+        latest_checkpoint = last if last.exists() else None
+
+        return TrainResult(
+            best_model_path=best,
+            plot_files=plot_files,
+            latest_checkpoint_path=latest_checkpoint,
+        )
 
     # -- export / inference ---------------------------------------------------
     def export_onnx(

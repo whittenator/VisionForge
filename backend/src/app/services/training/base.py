@@ -62,6 +62,9 @@ class Capabilities:
     models_by_task: dict[str, list[str]]
     groups: list[FieldGroup]
     device_options: list[str]
+    # Whether this backend can resume training from a prior checkpoint. Trainers
+    # that support it set this True; everything else keeps the safe default.
+    supports_resume: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -103,6 +106,9 @@ class TrainResult:
     best_model_path: Path | None = None
     final_metrics: dict[str, Any] = field(default_factory=dict)
     plot_files: list[Path] = field(default_factory=list)
+    # Latest resumable checkpoint (e.g. Ultralytics' ``last.pt``) the task can
+    # upload so a future run can resume from it. None when unavailable.
+    latest_checkpoint_path: Path | None = None
     # Framework-specific reconstruction info (e.g. timm arch/config) stored
     # alongside the artifact so export/inference can rebuild the model.
     artifact_meta: dict[str, Any] = field(default_factory=dict)
